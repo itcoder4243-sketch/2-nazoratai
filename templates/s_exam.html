@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block bodyclass %}noselect{% endblock %}
+{% block header %}{% endblock %}
+{% block body %}
+<div id="timer"><span>{{ user.name }}</span><b id="clock">--:--</b><span id="saved" class="mut">saqlandi</span></div>
+<canvas id="wmc" style="display:none"></canvas><div id="wm"></div>
+<div id="gate"><div>
+<h2 id="gtitle">To'liq ekran rejimida yozing</h2>
+<p id="gmsg">Imtihonni davom ettirish uchun tugmani bosing. Boshqa oynaga o'tish va nusxa olish ustozga ko'rinadi.</p>
+<button id="gbtn" class="ok">Davom etish</button>
+</div></div>
+<main>
+<div class="card mut" id="warn" style="display:none;background:#fff3bf;color:#8a5a00"></div>
+{% for it in items %}
+<div class="card">
+<div class="mut">Savol {{ it.pos }} / {{ items|length }}</div>
+<div class="q">{{ it.text }}</div>
+<textarea data-id="{{ it.id }}" placeholder="Javobingizni o'zingiz yozing..." spellcheck="false" autocomplete="off">{{ it.answer }}</textarea>
+</div>
+{% endfor %}
+<p><button id="finish" class="ok">Ishni yuborish</button></p>
+</main>
+<script>
+let STRIKES={{ strikes }}; const REMAIN={{ remaining }}, MAXS={{ max_strikes }}, PEN={{ penalty }}, WM="{{ user.name|e }} · {{ user.login|e }}";
+const end=Date.now()+REMAIN*1000;
+const $=s=>document.querySelector(s), tas=[...document.querySelectorAll('textarea')];
+let done=false, armed=false;
+
+// --- suv belgisi ---
+(function(){const c=$('#wmc');c.width=340;c.height=170;const x=c.getContext('2d');
+x.translate(170,85);x.rotate(-0.35);x.font='bold 17px sans-serif';x.fillStyle='rgba(60,70,110,0.13)';
+x.textAlign='center';x.fillText(WM,0,0);x.fillText(new Date().toLocaleDateString(),0,22);
+$('#wm').style.background='url('+c.toDataURL()+')';})();
+
+// --- server bilan aloqa ---
+async function post(url,body){try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return await r.json();}catch(e){return null;}}
+function collect(){const a={};tas.forEach(t=>a[t.dataset.id]=t.value);return a;}
+async function save(final){
+  const r=await post('/api/save',{answers:collect(),final:!!final});
+  if(r&&r.submitted){finish();return;}
+  $('#saved').textContent=r?'saqlandi '+new Date().toLocaleTimeString():'⚠ aloqa yo\'q';
+}
+function finish(){done=true;location.href='/s';}
+setInterval(()=>save(false),10000);
+tas.forEach(t=>t.addEventListener('blur',()=>save(false)));
+$('#finish').onclick=async()=>{armed=false;if(confirm('Ishni yuborasizmi? Qaytib bo\'lmaydi.')){await save(true);finish();}else setTimeout(()=>armed=true,800);};
+
+// --- taymer ---
+setInterval(async()=>{
+  const s=Math.max(0,Math.round((end-Date.now())/1000));
+  $('#clock').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+  $('#timer').classList.toggle('low',s<300);
+  if(s<=0&&!done){await save(true);finish();}
+},500);
+
+const gate=$('#gate');
+// --- buzilishlar ---
+let lastV=0;
+async function violation(kind){
+  if(done||!armed)return;
+  const now=Date.now(); if(now-lastV<1500)return; lastV=now;
+  const r=await post('/api/violation',{kind});
+  if(r&&r.submitted){finish();return;}
+  if(r&&r.strike){STRIKES=r.strikes;showStrike();}
+}
+function showStrike(){
+  const left=MAXS-STRIKES;
+  const w=$('#warn');w.style.display='block';
+  w.textContent='⚠ Ogohlantirish '+STRIKES+' / '+MAXS+': oynadan chiqdingiz. Jarima: -'+(PEN*STRIKES)+' ball.';
+  if(document.fullscreenElement||true){
+    $('#gtitle').textContent='⚠ Ogohlantirish '+STRIKES+' / '+MAXS;
+    $('#gmsg').textContent='Siz imtihon oynasidan chiqdingiz yoki skrinshot olishga urindingiz. Jarima: -'+PEN+' ball (jami -'+(PEN*STRIKES)+'). '+(left===1?'Keyingi safar nazoratdan CHETLASHTIRILASIZ!':'Yana '+left+' marta chiqsangiz nazoratdan chetlashtirilasiz.');
+    gate.classList.add('show');
+  }
+}
+function block(e){e.preventDefault();violation(e.type);return false;}
+['copy','cut','paste','drop','dragstart','contextmenu','selectstart'].forEach(ev=>{
+  document.addEventListener(ev,e=>{
+    if(ev==='selectstart'&&e.target.tagName==='TEXTAREA')return;
+    if(ev==='selectstart'){e.preventDefault();return;}
+    block(e);},true);});
+document.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase(),ctrl=e.ctrlKey||e.metaKey;
+  if(k==='printscreen'){navigator.clipboard&&navigator.clipboard.writeText('').catch(()=>{});violation('printscreen');e.preventDefault();}
+  else if(ctrl&&['c','x','v','a','p','s','u'].includes(k)&&!(k==='a'&&e.target.tagName==='TEXTAREA')){block(e);}
+  else if(ctrl&&e.shiftKey&&['i','j','c','s'].includes(k)||k==='f12'){block(e);}
+  else if(e.metaKey&&e.shiftKey&&['3','4','5'].includes(k)){violation('screenshot_key');}
+},true);
+tas.forEach(t=>{
+  let last=t.value;
+  t.addEventListener('beforeinput',e=>{if(e.inputType==='insertFromPaste'||e.inputType==='insertFromDrop'){e.preventDefault();violation('paste');}});
+  t.addEventListener('input',()=>{ // bir zumda katta matn paydo bo'lsa: qo'yish deb hisoblab bekor qilamiz
+    if(t.value.length-last.length>25){t.value=last;violation('paste_big');}else last=t.value;});
+});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)violation('tab_hidden');});
+window.addEventListener('blur',()=>violation('window_blur'));
+window.addEventListener('beforeprint',()=>violation('print'));
+window.addEventListener('beforeunload',e=>{if(!done){e.preventDefault();e.returnValue='';}});
+
+// --- to'liq ekran ---
+function needFS(msg){if(done)return;gate.classList.add('show');$('#gmsg').textContent=msg||$('#gmsg').textContent;}
+$('#gbtn').onclick=async()=>{
+  if(document.documentElement.requestFullscreen){try{await document.documentElement.requestFullscreen();}catch(e){}}
+  gate.classList.remove('show');setTimeout(()=>armed=true,800);};
+document.addEventListener('fullscreenchange',()=>{
+  if(!document.fullscreenElement){violation('exit_fullscreen');needFS('To\'liq ekrandan chiqdingiz. Davom etish uchun qayta kiring.');}});
+needFS();
+if(STRIKES>0)showStrike();
+</script>
+{% endblock %}
+

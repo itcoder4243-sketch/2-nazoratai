@@ -1,0 +1,21 @@
+{% extends "base_t.html" %}
+{% block body %}
+<main>
+<div class="card" style="margin-bottom:18px">
+<h2>Savollar qo'shish</h2>
+<form method="post" action="/t/questions/import">
+<label>Har bir qatorga bitta savol (Word/Excel dan ustunni nusxalab qo'ysangiz bo'ladi)</label>
+<textarea name="text" required placeholder="1-savol matni&#10;2-savol matni&#10;..."></textarea>
+<p><button>Qo'shish</button></p>
+</form></div>
+<div class="card" style="margin-bottom:18px">
+<h2>Baza: {{ qs|length }} ta savol</h2>
+<table><tr><th>#</th><th>Savol</th><th>Ishlatilgan</th><th></th></tr>
+{% for q in qs %}
+<tr><td>{{ q.id }}</td><td>{{ q.text }}</td><td>{{ q.used }}</td>
+<td>{% if not q.used %}<form method="post" action="/t/questions/delete/{{ q.id }}" onsubmit="return confirm('O\'chiraymi?')"><button class="bad">×</button></form>{% endif %}</td></tr>
+{% endfor %}</table></div>
+</main>
+{% endblock %}
+
+

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block body %}
+<main>
+{% if not att %}
+<div class="card">
+<h2>Salom, {{ user.name }}!</h2>
+<p>Nazorat ishi: <b>{{ q_count }} ta savol</b>, vaqt: <b>{{ minutes }} daqiqa</b>. Savollar sizga tasodifiy tanlanadi.</p>
+<ul class="mut">
+<li>Boshlaganingizdan keyin taymer to'xtamaydi, sahifani yopsangiz ham.</li>
+<li>Nusxa olish, qo'yish, skrinshot va boshqa oynaga o'tish taqiqlanadi, hammasi ustozga ko'rinadi.</li>
+<li>Javoblar avtomatik saqlanadi. Vaqt tugaganda ish o'zi yuboriladi.</li>
+</ul>
+<form method="post" action="/s/start"><button class="ok">Boshlash</button></form>
+</div>
+{% elif att.submitted_at is none %}
+<div class="card"><h2>Ish davom etmoqda</h2><a class="btn" href="/s/exam">Ishga qaytish</a></div>
+{% elif att.disq and not att.graded %}
+<div class="card"><h2 class="err">⛔ Siz nazoratdan chetlashtirildingiz</h2>
+<p>Imtihon vaqtida oynadan bir necha marta chiqqaningiz uchun ish to'xtatildi. Ustoz siz bilan bog'lanadi.</p></div>
+{% elif not att.graded %}
+<div class="card"><h2>✅ Ish yuborildi</h2>
+<p>Ustoz tekshirgandan keyin baho va izoh shu yerda ko'rinadi. Keyinroq qayta kiring.</p></div>
+{% else %}
+<div class="card">
+<div class="row">
+<div class="stat"><span class="mut">Ball</span><b>{{ att.total|round(1) }} / {{ mx * items|length }}</b></div>
+<div class="stat"><span class="mut">Baho</span><b>{{ grade_of(att.total, mx * items|length) }}</b></div>
+</div>
+{% if att.disq %}<p class="err"><b>⛔ Nazoratdan chetlashtirilgansiz</b>: oynadan ko'p chiqqaningiz uchun natija 0.</p>
+{% elif att.deduct %}<p class="err">Jarima: <b>-{{ att.deduct|round(0)|int }} ball</b> (ruxsatsiz oynadan chiqqaningiz uchun).</p>{% endif %}
+{% if att.comment %}<h3>Ustozning izohi</h3><div class="ans">{{ att.comment }}</div>{% endif %}
+</div>
+{% for it in items %}
+<div class="card">
+<div class="mut">Savol {{ it.pos }}</div>
+<div class="q">{{ it.text }}</div>
+<div class="mut">Sizning javobingiz</div>
+<div class="ans">{{ it.answer or '(javob yo\'q)' }}</div>
+<p><span class="tag {{ 'g' if it.score and it.score >= mx*0.7 else 'y' if it.score and it.score >= mx*0.4 else 'r' }}">{{ (it.score or 0)|round(1) }} / {{ mx }}</span></p>
+{% if it.comment %}<div class="mut">Izoh:</div><div class="ans">{{ it.comment }}</div>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+</main>
+{% endblock %}

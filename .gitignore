@@ -1,0 +1,32 @@
+# maxfiy ma'lumotlar
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+token*
+secrets*
+
+# bazalar va ma'lumotlar (o'quvchilar, javoblar, parollar)
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.csv
+*.xlsx
+*.xls
+*.docx
+state.json
+
+# muhit va kesh
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+*.bak*
+.pytest_cache/
+.idea/
+.vscode/
+shots/

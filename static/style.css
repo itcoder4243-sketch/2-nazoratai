@@ -1,0 +1,52 @@
+:root{--bg:#f4f6fb;--card:#fff;--ink:#1c2333;--mut:#6b7488;--pri:#3b5bdb;--ok:#2f9e44;--bad:#e03131;--warn:#f08c00;--bd:#e3e7f0}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:#fff;color:#1c2333;border-bottom:3px solid var(--pri);padding:12px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+header b{font-size:18px}header a{color:#4a5775;text-decoration:none;font-size:15px}header a:hover{color:var(--pri)}
+header .sp{flex:1}
+main{max-width:980px;margin:22px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px;margin-bottom:16px}
+h1,h2,h3{margin:.2em 0 .6em}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 10px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top;font-size:15px}
+th{color:var(--mut);font-weight:600;font-size:13px;text-transform:uppercase}
+input,textarea,select{width:100%;padding:9px 11px;border:1px solid #cdd3e1;border-radius:8px;font:inherit;background:#fff}
+textarea{min-height:130px;resize:vertical}
+label{display:block;font-size:14px;color:var(--mut);margin:8px 0 4px}
+button,.btn{background:var(--pri);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
+button.sec,.btn.sec{background:#e9edf8;color:var(--ink)}button.bad{background:var(--bad)}button.ok{background:var(--ok)}
+.row{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.stat{text-align:center}.stat b{display:block;font-size:28px}
+.tag{padding:2px 9px;border-radius:99px;font-size:13px;background:#e9edf8}
+.tag.g{background:#d3f9d8;color:#1b6b2a}.tag.y{background:#fff3bf;color:#8a5a00}.tag.r{background:#ffe3e3;color:#a61e1e}
+.q{white-space:pre-wrap;font-weight:600;margin-bottom:8px}
+.ans{white-space:pre-wrap;background:#f8f9fc;border:1px solid var(--bd);border-radius:8px;padding:10px}
+.mut{color:var(--mut);font-size:14px}.err{color:var(--bad)}
+.center{max-width:380px;margin:12vh auto}
+.big{font-size:44px;font-weight:700}
+#timer{position:sticky;top:0;z-index:5;background:#3b5bdb;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center}
+#timer b{font-size:22px;font-variant-numeric:tabular-nums}#timer.low b{color:#ffd8a8}
+#wm{position:fixed;inset:0;z-index:50;pointer-events:none}
+#gate{position:fixed;inset:0;z-index:60;background:rgba(20,24,38,.96);color:#fff;display:none;align-items:center;justify-content:center;text-align:center;padding:20px}
+#gate.show{display:flex}
+.noselect,.noselect *:not(textarea){-webkit-user-select:none;user-select:none}
+@media print{body{display:none!important}}
+
+/* ---- telefon uchun ---- */
+html{-webkit-text-size-adjust:100%}
+textarea,input,select{font-size:16px}   /* iOS'da yaqinlashib ketmasligi uchun */
+button,.btn{min-height:44px}
+@media(max-width:640px){
+  main{margin:12px auto;padding:0 10px}
+  .card{padding:14px;border-radius:10px}
+  header{padding:10px 12px;gap:10px}
+  #timer{padding:8px 12px;font-size:14px}#timer b{font-size:24px}
+  #timer span:first-child{max-width:30vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  textarea{min-height:170px}
+  #finish{width:100%}
+  table{display:block;overflow-x:auto;white-space:nowrap}
+  .row{grid-template-columns:1fr 1fr}
+  .big{font-size:34px}
+  #gate h2{font-size:22px}#gate button{width:100%}
+}
+

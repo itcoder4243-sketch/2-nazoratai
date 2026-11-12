@@ -1,0 +1,40 @@
+NAZORAT ISHI TIZIMI: WINDOWS 8.1 UCHUN
+=======================================
+
+1) PYTHON O'RNATISH (bir marta)
+   - Python 3.11.9 yuklab o'rnating: https://www.python.org/downloads/release/python-3119/
+     (Windows installer 64-bit). O'rnatishda "Add python.exe to PATH" ni belgilang.
+   - Windows 8.1 da Python 3.13 va undan yangisi ISHLAMAYDI. 3.8 dan 3.12 gacha mos.
+
+2) KUTUBXONALAR (bir marta, internet kerak)
+   - setup_win81.bat ni ikki marta bosing. Oxirigacha kuting ("Tayyor" chiqadi).
+
+3) ISHGA TUSHIRISH
+   - run_win81.bat ni ikki marta bosing. Oyna ochiq turishi kerak.
+   - Birinchi marta ishga tushganda oynada USTOZ PAROLI chiqadi:
+       [!] Ustoz paroli yaratildi: login=ustoz parol=XXXXXXXX
+     Uni yozib oling.
+   - Oynada talabalar kiradigan manzillar chiqadi (masalan http://192.168.1.20:8000).
+
+4) TALABALAR QANDAY KIRADI
+   - Bitta Wi-Fi yoki bitta tarmoqda bo'lsa: shu manzil.
+   - Boshqa internetdan kirishi kerak bo'lsa tunnel kerak (pastga qarang).
+   - Windows xavfsizlik devori so'rasa, "Ruxsat berish" (Allow) ni bosing, shunda boshqa
+     qurilmalar kira oladi.
+
+5) USTOZ: manzilga kirib login "ustoz" va yuqoridagi parol bilan kiring.
+   "Savollar" bo'limiga 150 ta savolni qo'shing (har qatorga bitta),
+   "Talabalar" bo'limiga talabalar ro'yxatini qo'shing, login va parollar o'zi yaratiladi.
+
+BRAUZER (talabalar uchun)
+   - Windows 8.1 da eng yangi Chrome 109, Firefox ESR 115 yoki Edge ishlaydi.
+   - Internet Explorer 11 ISHLAMAYDI.
+
+TUNNEL (boshqa internetdan kirish uchun)
+   - cloudflared va Tailscale Windows 8.1 da ishlamaydi (Windows 10+ kerak).
+   - Eng oson yo'l: serverni Windows 10 yoki undan yangi kompyuterda ishga tushirish,
+     Windows 8.1 kompyuterdan esa faqat brauzer sifatida foydalanish.
+   - Yoki bepul Render.com hosting (GitHub orqali).
+
+MA'LUMOTLAR
+   - Hammasi data\nazorat.db faylida. Imtihondan keyin shu faylni nusxalab saqlab qo'ying.

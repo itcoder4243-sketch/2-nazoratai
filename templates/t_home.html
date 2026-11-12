@@ -1,0 +1,45 @@
+{% extends "base_t.html" %}
+{% block body %}
+<main>
+{% from "icons.html" import ic %}
+<div class="row" style="margin-bottom:18px">
+<div class="card stat"><div class="ico">{{ ic('users') }}</div><span class="mut">Talabalar</span><b>{{ stats.students }}</b></div>
+<div class="card stat c2"><div class="ico">{{ ic('book') }}</div><span class="mut">Savollar bazasi</span><b>{{ stats.questions }}</b></div>
+<div class="card stat c3"><div class="ico">{{ ic('clock') }}</div><span class="mut">Tekshirilmagan</span><b>{{ stats.pending }}</b></div>
+<div class="card stat c4"><div class="ico">{{ ic('check') }}</div><span class="mut">Baholangan</span><b>{{ stats.graded }}</b></div>
+</div>
+<div class="card" style="margin-bottom:18px">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<h2>Natijalar</h2><div><a class="btn sec" href="/t">Yangilash</a> <a class="btn sec" href="/t/export.csv">Excel (CSV)</a></div></div>
+<table>
+<tr><th>Talaba</th><th>Holat</th><th>Boshladi</th><th>Jarima (oynadan chiqish)</th><th>Ball / {{ mx_total }}</th><th>Baho</th><th></th></tr>
+{% for r in rows %}
+<tr>
+<td>{{ r.name }}<div class="mut">{{ r.login }}</div></td>
+<td><span class="tag {{ 'g' if r.state=='Baholangan' else 'y' if r.state=='Tekshirilmagan' else 'r' if r.state=='Chetlatilgan' else '' }}">{{ r.state }}</span></td>
+<td>{{ r.started_at|dt }}</td>
+<td>{% if r.viol %}<span class="tag r">{{ r.viol }}</span>{% else %}-{% endif %}</td>
+<td>{{ r.total|round(1) if r.graded else '-' }}</td>
+<td>{{ grade_of(r.total, mx_total) if r.graded else '-' }}</td>
+<td>{% if r.aid %}<a class="btn sec" href="/t/attempt/{{ r.aid }}">{{ 'Ko\'rish' if r.graded else 'Tekshirish' }}</a>{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="7" class="mut">Talabalar yo'q. "Talabalar" bo'limidan qo'shing.</td></tr>
+{% endfor %}
+</table></div>
+
+<div class="card" style="margin-bottom:18px">
+<h3>Sozlamalar</h3>
+<form method="post" action="/t/settings" class="row">
+<div><label>Vaqt (daqiqa)</label><input type="number" name="duration_min" value="{{ cfg.duration_min }}" min="1"></div>
+<div><label>Savollar soni</label><input type="number" name="q_count" value="{{ cfg.q_count }}" min="1"></div>
+<div><label>Har savol maks. ball</label><input type="number" name="max_per_q" value="{{ cfg.max_per_q }}" min="1"></div>
+<div><label>Har ogohlantirish jarimasi (ball)</label><input type="number" name="penalty_points" value="{{ cfg.penalty_points }}" min="0"></div>
+<div><label>Nechinchisida chetlatiladi</label><input type="number" name="max_strikes" value="{{ cfg.max_strikes }}" min="1"></div>
+<div style="align-self:end"><button>Saqlash</button></div>
+</form>
+<p class="mut">Vaqt va savollar soni faqat hali boshlamagan talabalarga ta'sir qiladi. Oynadan chiqish yoki skrinshot urinishi: 1- va 2-marta jarima, 3-martada talaba chetlatiladi va ish avtomatik yuboriladi.</p>
+</div>
+</main>
+{% endblock %}
+
+

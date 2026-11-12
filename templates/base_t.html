@@ -1,0 +1,22 @@
+{% from "icons.html" import ic %}<!doctype html>
+<html lang="uz"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ustoz paneli · Nazorat</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/teacher.css"></head>
+<body class="t">
+<div class="shell">
+<aside class="side">
+  <div class="brand"><span class="logo">{{ ic('logo') }}</span><div><b>Nazorat</b><small>Ustoz paneli</small></div></div>
+  {% set p = request.url.path %}
+  <nav>
+    <a href="/t" class="{{ 'on' if p == '/t' or p.startswith('/t/attempt') }}">{{ ic('chart') }}<span>Natijalar</span></a>
+    <a href="/t/questions" class="{{ 'on' if p.startswith('/t/questions') }}">{{ ic('book') }}<span>Savollar</span></a>
+    <a href="/t/students" class="{{ 'on' if p.startswith('/t/students') }}">{{ ic('users') }}<span>Talabalar</span></a>
+  </nav>
+  <div class="me"><div class="av">{{ user.name[:1] }}</div><div><b>{{ user.name }}</b><small>Administrator</small></div>
+    <a href="/logout" title="Chiqish">{{ ic('logout') }}</a></div>
+</aside>
+<div class="content">{% block body %}{% endblock %}</div>
+</div>
+</body></html>
