@@ -11,16 +11,34 @@
 <li>Javoblar avtomatik saqlanadi. Vaqt tugaganda ish o'zi yuboriladi.</li>
 </ul>
 {% if user.carry %}<p class="err">Bu qayta topshirish: yakuniy natijangizdan <b>{{ user.carry|num }} ball</b> chegiriladi.</p>{% endif %}
+{% if win.state == 'before' %}
+<div class="wait" data-open="{{ win.open_at }}" data-now="{{ now }}">
+  <div class="mut">Nazorat ishi boshlanadi:</div>
+  <b class="when">{{ win.open_at|dtf }}</b>
+  <div class="cd" id="cd">–</div>
+  <p class="mut">Vaqt kelganda sahifa o'zi yangilanadi va «Boshlash» tugmasi chiqadi.</p>
+</div>
+<script>
+(function(){const w=document.querySelector('.wait'),open=+w.dataset.open,skew=Date.now()/1000-(+w.dataset.now),el=document.getElementById('cd');
+function tick(){const left=Math.round(open-(Date.now()/1000-skew));if(left<=0){location.reload();return;}
+const h=Math.floor(left/3600),m=Math.floor(left%3600/60),s=left%60;el.textContent=(h?h+':':'')+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');}
+tick();setInterval(tick,1000);})();
+</script>
+{% elif win.state == 'closed' %}
+<p class="err"><b>Nazorat ishi yopilgan</b> ({{ win.close_at|dtf }}). Savollar bo'lsa, ustozga murojaat qiling.</p>
+{% else %}
+{% if win.close_at %}<p class="mut">Nazorat {{ win.close_at|dtf }} da yopiladi. Vaqtingiz shu vaqtdan oshmaydi.</p>{% endif %}
 <form method="post" action="/s/start"><button class="ok">Boshlash</button></form>
+{% endif %}
 </div>
 {% elif att.submitted_at is none %}
 <div class="card"><h2>Ish davom etmoqda</h2><a class="btn" href="/s/exam">Ishga qaytish</a></div>
 {% elif att.disq and not att.graded %}
 <div class="card"><h2 class="err">⛔ Siz nazoratdan chetlashtirildingiz</h2>
 <p>Imtihon vaqtida oynadan bir necha marta chiqqaningiz uchun ish to'xtatildi. Ustoz siz bilan bog'lanadi.</p></div>
-{% elif not att.graded %}
+{% elif not att.graded or not published %}
 <div class="card"><h2>✅ Ish yuborildi</h2>
-<p>Ustoz tekshirgandan keyin baho va izoh shu yerda ko'rinadi. Keyinroq qayta kiring.</p></div>
+<p>Natijalar ustoz e'lon qilgandan keyin shu yerda ko'rinadi: ball, baho va izohlar. Keyinroq qayta kiring.</p></div>
 {% else %}
 <div class="card">
 <div class="row">

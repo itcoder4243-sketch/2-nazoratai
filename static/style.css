@@ -100,3 +100,12 @@ body.lg{background:radial-gradient(700px 400px at 80% -10%,#dfe6ff,transparent 6
 .pwbox .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;min-height:36px;padding:4px 10px;color:var(--mut)}
 .rules{font-size:13px;color:#8a5a00;background:#fff8e1;border-radius:8px;padding:8px 10px;margin:4px 0 0}
 @media(max-width:640px){.login{margin:6vh auto;width:calc(100% - 24px)}}
+
+/* imtihon ochilishini kutish */
+.wait{text-align:center;border:1px dashed var(--bd,#d0d7e2);border-radius:14px;padding:18px;margin:12px 0}
+.wait .when{display:block;font-size:20px;margin:4px 0}
+.wait .cd{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:1px;margin:6px 0}
+header{flex-wrap:nowrap;gap:10px}
+header b{white-space:nowrap}
+header .mut{min-width:0;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header a{flex:none}

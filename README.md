@@ -19,6 +19,12 @@ Ustoz savollar bazasini yuritadi. Har bir o'quvchiga bazadan alohida **5 ta savo
 **Ustoz paneli**
 - Dashboard: asosiy ko'rsatkichlar, imtihon jarayoni, ballar gistogrammasi, baholar taqsimoti, TOP-10, eng past 10, guruhlar kesimi.
 - Tekshirish: baholanmagan ishlar navbati va «Saqlash va keyingisi» oqimi.
+- Excel hisobot (.xlsx): natijalar (har savol bali bilan), guruhlar kesimi, taqsimot diagrammasi.
+- Natijalarni e'lon qilish: o'quvchilar ball va izohni faqat ustoz e'lon qilgandan keyin ko'radi.
+- Imtihon vaqti: belgilangan vaqtda avtomatik ochiladi va yopiladi (Toshkent vaqti).
+- Zaxira: har kuni avtomatik zaxira (14 kun saqlanadi), qo'lda zaxira olish va yuklab olish.
+- Ustoz parolini panelning o'zidan o'zgartirish.
+- Telefon: menyu pastki chap tugma orqali chap tomondan chiqadi.
 - Natijalar: filtrlar, avtomatik yangilanish, qolgan vaqt, kengaytirilgan CSV.
 - O'quvchilar: qo'shish, tahrirlash, ommaviy yuklash, parolni tiklash, guruhlar, CSV.
 - Savollar: qo'shish, tahrirlash, qidirish, takrorlarni aniqlash, xavfsiz o'chirish.
@@ -69,6 +75,7 @@ pip install -r requirements-dev.txt
 python tests/smoke_test.py
 python tests/test_teacher_features.py
 python tests/test_ui_flow.py
+python tests/test_admin_tools.py
 ```
 
 Sinovlar vaqtinchalik bazada, to'qima ma'lumotlar bilan ishlaydi, real bazaga tegmaydi.

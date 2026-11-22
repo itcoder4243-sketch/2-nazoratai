@@ -36,6 +36,7 @@ assert len(seen) == len(set(seen)), "takror savol!"
 print("takrorlanmagan savollar:", len(seen))
 
 t = client(); login(t, "ustoz", "ustoz123")
+t.post("/t/publish", data={"on": "1"})  # natijalar o'quvchilarga ko'rinsin
 assert "Tekshirilmagan" in t.get("/t/results").text
 aid = A.connect().execute("SELECT id FROM attempts LIMIT 1").fetchone()["id"]
 page = t.get(f"/t/attempt/{aid}"); assert "tab_hidden" in page.text

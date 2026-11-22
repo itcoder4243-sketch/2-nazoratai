@@ -12,6 +12,7 @@ def check(n, c, x=""):
 def cl(): return TestClient(A.app, follow_redirects=True)
 db = lambda: A.connect()
 T = cl(); r = T.post("/login", data={"login": "ustoz", "password": TPW})
+T.post("/t/publish", data={"on": "1"})  # natijalar o'quvchilarga ko'rinsin
 check("ustoz kiradi", "Natijalar" in r.text)
 for p in ["/t", "/t/students", "/t/questions", "/t/export.csv", "/t/students.csv", "/t/students.csv?grp=G1"]:
     r = T.get(p); check(f"GET {p} 200", r.status_code == 200, r.status_code)

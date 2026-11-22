@@ -1,25 +1,71 @@
 {% extends "base_t.html" %}
 {% block body %}
 <main>
-<div class="card" style="margin-bottom:18px">
-<h2>Nazorat sozlamalari</h2>
+<div class="phead"><div><h1>Sozlamalar</h1><p class="mut">Nazorat parametrlari, imtihon vaqti, natijalar, zaxira va xavfsizlik.</p></div></div>
+<nav class="subnav">
+  <a href="#exam">Parametrlar</a><a href="#window">Imtihon vaqti</a><a href="#publish">Natijalar</a><a href="#backup">Zaxira</a><a href="#security">Parol</a>
+</nav>
+
+<section class="card sec" id="exam">
+<div class="bar"><h2>Nazorat parametrlari</h2>
+  <span class="mut">{{ cfg.duration_min }} daq · {{ cfg.q_count }} × {{ cfg.max_per_q }} = {{ cfg.q_count * cfg.max_per_q }} ball · −{{ cfg.penalty_points }} jarima</span></div>
 <form method="post" action="/t/settings" class="row">
 <div style="grid-column:1/-1"><label>Nazorat nomi (kirish sahifasida ko'rinadi)</label><input name="exam_title" value="{{ cfg.exam_title }}" placeholder="masalan: Pedagogika — nazorat ishi" maxlength="120"></div>
 <div><label>Vaqt (daqiqa)</label><input type="number" name="duration_min" value="{{ cfg.duration_min }}" min="1"></div>
 <div><label>Savollar soni</label><input type="number" name="q_count" value="{{ cfg.q_count }}" min="1"></div>
 <div><label>Har savol maks. ball</label><input type="number" name="max_per_q" value="{{ cfg.max_per_q }}" min="1"></div>
-<div><label>Har ogohlantirish jarimasi (ball)</label><input type="number" name="penalty_points" value="{{ cfg.penalty_points }}" min="0"></div>
+<div><label>Jarima (ball)</label><input type="number" name="penalty_points" value="{{ cfg.penalty_points }}" min="0"></div>
 <div><label>Nechinchisida chetlatiladi</label><input type="number" name="max_strikes" value="{{ cfg.max_strikes }}" min="1"></div>
 <div style="align-self:end"><button>Saqlash</button></div>
 </form>
-<p class="mut">Vaqt va savollar soni faqat hali boshlamagan talabalarga ta'sir qiladi. Oynadan chiqish yoki skrinshot urinishi: 1- va 2-marta jarima, 3-martada talaba chetlatiladi va ish avtomatik yuboriladi.</p>
-</div>
-<div class="card" style="margin-bottom:18px">
-<h3>Hozirgi qiymatlar</h3>
-<div class="row tight">
-<div class="kv"><span class="mut">Vaqt</span><b>{{ cfg.duration_min }} daqiqa</b></div>
-<div class="kv"><span class="mut">Savollar va ball</span><b>{{ cfg.q_count }} ta × {{ cfg.max_per_q }} = {{ cfg.q_count * cfg.max_per_q }} ball</b></div>
-<div class="kv"><span class="mut">Jarima</span><b>−{{ cfg.penalty_points }} ball, {{ cfg.max_strikes }}-martada chetlatish</b></div>
-</div></div>
+<p class="mut">Vaqt va savollar soni faqat hali boshlamagan talabalarga ta'sir qiladi. Oynadan chiqish: 1- va 2-marta jarima, {{ cfg.max_strikes }}-martada talaba chetlatiladi.</p>
+</section>
+
+<section class="card sec" id="window">
+<div class="bar"><h2>Imtihon vaqti</h2>
+  {% if win.state == 'before' %}<span class="tag y">Hali ochilmagan</span>{% elif win.state == 'closed' %}<span class="tag r">Yopilgan</span>{% else %}<span class="tag g">Ochiq</span>{% endif %}</div>
+<form method="post" action="/t/window" class="row">
+<div><label>Ochiladi (Toshkent vaqti)</label><input type="datetime-local" name="open_at" value="{{ win.open_at|dtl }}"></div>
+<div><label>Yopiladi (Toshkent vaqti)</label><input type="datetime-local" name="close_at" value="{{ win.close_at|dtl }}"></div>
+<div style="align-self:end" class="acts"><button>Saqlash</button>
+  {% if win.open_at or win.close_at %}<button class="sec" name="clear" value="1" onclick="return confirm('Vaqt cheklovi olib tashlansinmi? Imtihon doim ochiq bo\'ladi.')">Cheklovni olib tashlash</button>{% endif %}</div>
+</form>
+<p class="mut">Bo'sh qoldirilsa, cheklov yo'q. Ochilishdan oldin talabalar kirib, qolgan vaqtni ko'radi va vaqt kelganda «Boshlash» tugmasi chiqadi.
+Yopilgandan keyin yangi ish boshlab bo'lmaydi, yozayotganlarning vaqti ham yopilish vaqtida tugaydi. Hozir: {{ now_dtl|replace('T', ' ') }}.</p>
+</section>
+
+<section class="card sec" id="publish">
+<div class="bar"><h2>Natijalarni e'lon qilish</h2>
+  {% if cfg.results_published %}<span class="tag g">E'lon qilingan</span>{% else %}<span class="tag y">Yashirin</span>{% endif %}</div>
+{% if cfg.results_published %}
+<p>O'quvchilar baholangan ishlarida ball, baho va izohlarni ko'rmoqda.</p>
+<form method="post" action="/t/publish"><input type="hidden" name="on" value="0"><button class="sec">Natijalarni yashirish</button></form>
+{% else %}
+<p>O'quvchilar hozir faqat «Ish yuborildi» deb ko'radi. Barcha ishlarni tekshirib bo'lgach, natijalarni e'lon qiling.</p>
+<form method="post" action="/t/publish" onsubmit="return confirm('Natijalar barcha o\'quvchilarga ko\'rinadi. Davom etasizmi?')"><input type="hidden" name="on" value="1"><button class="ok">Natijalarni e'lon qilish</button></form>
+{% endif %}
+</section>
+
+<section class="card sec" id="backup">
+<div class="bar"><h2>Zaxira nusxalar</h2>
+  <form method="post" action="/t/backup"><button class="sm">Hozir zaxira olish</button></form></div>
+<p class="mut">Har kuni avtomatik bitta zaxira olinadi, oxirgi 14 kunniki saqlanadi. Imtihondan oldin va keyin qo'lda ham zaxira oling va kompyuteringizga yuklab qo'ying.</p>
+{% if backups %}<div class="tbl"><table>
+<tr><th>Fayl</th><th>Turi</th><th>Vaqt</th><th>Hajmi</th><th></th></tr>
+{% for b in backups %}<tr><td><code>{{ b.name }}</code></td><td>{{ b.kind }}</td><td>{{ b.ts|dt }}</td><td>{{ b.kb }} KB</td>
+<td><a class="btn sec sm" href="/t/backup/{{ b.name }}">Yuklab olish</a></td></tr>{% endfor %}
+</table></div>{% else %}<div class="empty">Hali zaxira yo'q. Birinchi kunlik zaxira server ishga tushgach bir necha daqiqada olinadi.</div>{% endif %}
+</section>
+
+<section class="card sec" id="security">
+<div class="bar"><h2>Ustoz parolini o'zgartirish</h2></div>
+<form method="post" action="/t/password" class="row" autocomplete="off">
+<div><label>Joriy parol</label><input type="password" name="current" required autocomplete="current-password"></div>
+<div><label>Yangi parol</label><input type="password" name="new" required minlength="8" autocomplete="new-password"></div>
+<div><label>Yangi parol (takror)</label><input type="password" name="confirm" required minlength="8" autocomplete="new-password"></div>
+<div style="align-self:end"><button>Parolni o'zgartirish</button></div>
+</form>
+<p class="mut">Kamida 8 belgi, harf va raqam aralash bo'lsin. O'zgartirilgach boshqa qurilmalardagi ustoz sessiyalari yopiladi.</p>
+</section>
 </main>
 {% endblock %}

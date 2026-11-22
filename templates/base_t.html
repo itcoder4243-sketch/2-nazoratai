@@ -2,11 +2,11 @@
 <html lang="uz"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ustoz paneli · Nazorat</title>
-<link rel="stylesheet" href="/static/style.css?v=4">
-<link rel="stylesheet" href="/static/teacher.css?v=7"></head>
+<link rel="stylesheet" href="/static/style.css?v=7">
+<link rel="stylesheet" href="/static/teacher.css?v=11"></head>
 <body class="t">
 <div class="shell">
-<aside class="side">
+<aside class="side" id="side" aria-label="Asosiy menyu">
   <div class="brand"><span class="logo">{{ ic('logo') }}</span><div><b>Nazorat</b><small>Ustoz paneli</small></div></div>
   {% set p = request.url.path %}
   <nav>
@@ -20,10 +20,33 @@
   <div class="me"><div class="av">{{ user.name[:1] }}</div><div><b>{{ user.name }}</b><small>Administrator</small></div>
     <a href="/logout" title="Chiqish">{{ ic('logout') }}</a></div>
 </aside>
+<div class="scrim" id="scrim" hidden></div>
+<button type="button" class="navbtn" id="navbtn" aria-label="Menyuni ochish" aria-controls="side" aria-expanded="false">
+  <svg class="svg i-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+  <svg class="svg i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+  {% if nav_todo %}<em class="badge">{{ nav_todo }}</em>{% endif %}</button>
 <div class="content">
 {% set msg = request.query_params.get('msg') %}
 {% if msg %}<div class="flash" id="flash">{{ msg }}<button type="button" onclick="this.parentNode.remove()" aria-label="Yopish">×</button></div>{% endif %}
 {% block body %}{% endblock %}</div>
+<script>
+// telefon: chap tomondan chiquvchi menyu (pastki chap tugma orqali)
+(function(){
+  const b=document.body,btn=document.getElementById('navbtn'),scrim=document.getElementById('scrim'),side=document.getElementById('side');
+  function set(on){b.classList.toggle('nav-open',on);btn.setAttribute('aria-expanded',on);btn.setAttribute('aria-label',on?'Menyuni yopish':'Menyuni ochish');scrim.hidden=!on;
+    if(on){const a=side.querySelector('nav a.on')||side.querySelector('nav a');a&&a.focus({preventScroll:true});}}
+  btn.onclick=()=>set(!b.classList.contains('nav-open'));
+  scrim.onclick=()=>set(false);
+  addEventListener('keydown',e=>{if(e.key==='Escape'&&b.classList.contains('nav-open')){set(false);btn.focus();}});
+  side.querySelectorAll('nav a').forEach(a=>a.addEventListener('click',()=>set(false)));
+  // pastki panel (baholash) bo'lsa, tugma uning ustida turadi
+  const gb=document.querySelector('.gbar');
+  if(gb&&window.ResizeObserver)new ResizeObserver(()=>b.style.setProperty('--gb',gb.offsetHeight+'px')).observe(gb);
+  // chapdan o'ngga surib yopish
+  let x0=null;side.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;},{passive:true});
+  side.addEventListener('touchend',e=>{if(x0!==null&&x0-e.changedTouches[0].clientX>60)set(false);x0=null;},{passive:true});
+})();
+</script>
 <script>
 // jadval filtri va sahifalash: <div data-filter="#id"> ichida <input data-f="q">, <select data-f="grp|state">; qatorlar <tr data-q data-grp data-state>
 (function(){

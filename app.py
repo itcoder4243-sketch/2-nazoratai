@@ -15,12 +15,13 @@ import sqlite3
 import threading
 import time
 import unicodedata
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import Body, Depends, FastAPI, Form, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -42,6 +43,10 @@ _load_dotenv(BASE / ".env")
 DB_PATH = os.environ.get("NAZORAT_DB") or str(BASE / "data" / "nazorat.db")
 # HTTPS (domen) orqali ishlaganda 1: sessiya cookie faqat shifrlangan ulanishda yuboriladi
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0") == "1"
+# server (Railway) UTC da ishlaydi: sahifa, Excel va jadvalda O'zbekiston vaqti (yozgi vaqt yo'q, +5)
+TZ = timezone(timedelta(hours=float(os.environ.get("APP_TZ_OFFSET", "5"))))
+BACKUP_DIR = Path(DB_PATH).parent / "backups"
+BACKUP_KEEP = 14  # kunlik zaxiralardan nechtasi saqlanadi
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Nazorat ishi", docs_url=None, redoc_url=None, openapi_url=None)
@@ -85,7 +90,9 @@ CREATE TABLE IF NOT EXISTS attempt_q(
   answer TEXT DEFAULT '', score REAL, comment TEXT);
 CREATE TABLE IF NOT EXISTS violations(id INTEGER PRIMARY KEY, attempt_id INTEGER, ts INTEGER, kind TEXT);
 """
-DEFAULTS = {"duration_min": "60", "q_count": "5", "max_per_q": "20", "penalty_points": "10", "max_strikes": "3"}
+DEFAULTS = {"duration_min": "60", "q_count": "5", "max_per_q": "20", "penalty_points": "10", "max_strikes": "3",
+            # natijalar ustoz e'lon qilgandan keyin ko'rinadi; imtihon oynasi: 0 = cheklovsiz (unix vaqt)
+            "results_published": "0", "open_at": "0", "close_at": "0"}
 # oynadan chiqish/skrinshot urinishlari jarima oladi; nusxa olish urinishlari faqat jurnalga yoziladi
 PENALTY_KINDS = {"tab_hidden", "window_blur", "exit_fullscreen", "printscreen", "screenshot_key", "print"}
 STRIKE_GAP = 5  # soniya: bitta chiqish bir necha hodisa bersa, bitta jarima
@@ -156,6 +163,7 @@ def init_db():
     conn.execute("ANALYZE")
     conn.close()
     threading.Thread(target=checkpointer, daemon=True).start()
+    threading.Thread(target=backup_loop, daemon=True).start()
 
 
 PBKDF2_ITERS = 10_000  # 100k bu kompyuterda ~200 ms/kirish edi: 200 kishi bir vaqtda kirsa 20+ soniya kutadi
@@ -286,13 +294,31 @@ def grade_of(total, max_total):
 
 
 templates.env.globals["grade_of"] = grade_of
-templates.env.filters["dt"] = lambda t: time.strftime("%d.%m %H:%M", time.localtime(t)) if t else "-"
-templates.env.filters["tm"] = lambda t: time.strftime("%H:%M", time.localtime(t)) if t else "-"
+def fmt_ts(t, f="%d.%m %H:%M"):
+    return datetime.fromtimestamp(t, TZ).strftime(f) if t else "-"
+
+
+def parse_local(v):
+    """<input type=datetime-local> qiymati (Toshkent vaqti) -> unix vaqt; bo'sh bo'lsa 0."""
+    v = (v or "").strip()
+    if not v:
+        return 0
+    return int(datetime.strptime(v[:16], "%Y-%m-%dT%H:%M").replace(tzinfo=TZ).timestamp())
+
+
+templates.env.filters["dt"] = lambda t: fmt_ts(t)
+templates.env.filters["tm"] = lambda t: fmt_ts(t, "%H:%M")
+templates.env.filters["dtl"] = lambda t: fmt_ts(t, "%Y-%m-%dT%H:%M") if t else ""
+templates.env.filters["dtf"] = lambda t: fmt_ts(t, "%d.%m.%Y %H:%M")
 templates.env.filters["num"] = lambda x: ("%g" % round(x or 0, 1))
 
 
 def back(url, msg=None):
-    return RedirectResponse(url + (("&" if "?" in url else "?") + "msg=" + quote(msg) if msg else ""), status_code=303)
+    # xabar so'rov qismiga, "#bo'lim" esa oxiriga: /t/settings?msg=...#window
+    path, _, frag = url.partition("#")
+    if msg:
+        path += ("&" if "?" in path else "?") + "msg=" + quote(msg)
+    return RedirectResponse(path + ("#" + frag if frag else ""), status_code=303)
 
 
 def slug(s):
@@ -369,6 +395,14 @@ def logout(request: Request, conn=Depends(get_db)):
 
 
 # ---------------- talaba ----------------
+def exam_window(conn, now=None):
+    """Imtihon oynasi holati: ('before'|'open'|'closed', open_at, close_at). 0 = chegara yo'q."""
+    now = now or time.time()
+    o, c = setting(conn, "open_at"), setting(conn, "close_at")
+    st = "before" if o and now < o else "closed" if c and now >= c else "open"
+    return {"state": st, "open_at": o, "close_at": c}
+
+
 def finalize_if_expired(conn, att):
     if att and att["submitted_at"] is None and time.time() > att["deadline"]:
         conn.execute("UPDATE attempts SET submitted_at=? WHERE id=?", (att["deadline"], att["id"]))
@@ -385,17 +419,20 @@ def get_attempt(conn, uid):
 def student_home(request: Request, u=Depends(require("student")), conn=Depends(get_db)):
     att = get_attempt(conn, u["id"])
     items, mx = [], setting(conn, "max_per_q")
-    if att and att["graded"]:
+    if att and att["graded"] and setting(conn, "results_published"):
         items = conn.execute(
             "SELECT aq.*, q.text FROM attempt_q aq JOIN questions q ON q.id=aq.question_id "
             "WHERE attempt_id=? ORDER BY pos", (att["id"],)).fetchall()
     return render(request, "s_home.html", user=u, att=att, items=items, mx=mx,
                   q_count=setting(conn, "q_count"), minutes=setting(conn, "duration_min"),
-                  now=int(time.time()))
+                  now=int(time.time()), win=exam_window(conn), published=setting(conn, "results_published"))
 
 
 @app.post("/s/start")
 def student_start(u=Depends(require("student")), conn=Depends(get_db)):
+    win = exam_window(conn)
+    if win["state"] != "open" and not conn.execute("SELECT 1 FROM attempts WHERE user_id=?", (u["id"],)).fetchone():
+        return RedirectResponse("/s", status_code=303)
     conn.execute("BEGIN IMMEDIATE")
     try:
         if not conn.execute("SELECT 1 FROM attempts WHERE user_id=?", (u["id"],)).fetchone():
@@ -409,9 +446,12 @@ def student_start(u=Depends(require("student")), conn=Depends(get_db)):
                 conn.execute("ROLLBACK")
                 return RedirectResponse("/s", status_code=303)
             now = int(time.time())
+            deadline = now + setting(conn, "duration_min") * 60
+            if win["close_at"]:  # yopilish vaqtidan oshmaydi
+                deadline = min(deadline, win["close_at"])
             cur = conn.execute(
                 "INSERT INTO attempts(user_id,started_at,deadline,carry,try_no) VALUES(?,?,?,?,?)",
-                (u["id"], now, now + setting(conn, "duration_min") * 60, u["carry"] or 0, (u["retakes"] or 0) + 1))
+                (u["id"], now, deadline, u["carry"] or 0, (u["retakes"] or 0) + 1))
             aid = cur.lastrowid
             for i, qid in enumerate(ids, 1):
                 conn.execute("INSERT INTO attempt_q(attempt_id,question_id,pos) VALUES(?,?,?)", (aid, qid, i))
@@ -569,7 +609,7 @@ def teacher_dashboard(request: Request, u=Depends(require("teacher")), conn=Depe
                        "graded": len(gg), "avg": sum(gg) / len(gg) if gg else None, "max": max(gg) if gg else None})
     return render(request, "t_dash.html", user=u, stats=stats, cfg=cfg, mx_total=mx, top=top, low=low,
                   hist=hist, hmax=hmax, grades=grades, summary=summary, groups=groups,
-                  events=recent_events(conn), now_s=time.strftime("%H:%M:%S"))
+                  events=recent_events(conn), now_s=fmt_ts(time.time(), "%H:%M:%S"), win=exam_window(conn))
 
 
 @app.get("/t/results")
@@ -618,7 +658,8 @@ def recent_events(conn, limit=12):
 @app.get("/t/settings")
 def teacher_settings_page(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
     cfg = load_cfg(conn)
-    return render(request, "t_settings.html", user=u, cfg=cfg)
+    return render(request, "t_settings.html", user=u, cfg=cfg, win=exam_window(conn), backups=list_backups(),
+                  now_dtl=fmt_ts(time.time(), "%Y-%m-%dT%H:%M"))
 
 
 @app.post("/t/settings")
@@ -1014,6 +1055,252 @@ def teacher_export(u=Depends(require("teacher")), conn=Depends(get_db)):
                     ("%g" % r["carry"]) if r["carry"] else "", r["comment"] or ""])
     return Response("﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": "attachment; filename=natijalar.csv"})
+
+
+
+@app.post("/t/publish")
+def teacher_publish(request: Request, u=Depends(require("teacher")), conn=Depends(get_db), on: int = Form(...)):
+    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('results_published',?)", ("1" if on else "0",))
+    _settings["t"] = 0
+    to = urlparse(request.headers.get("referer") or "").path  # tugma bosilgan sahifaga qaytadi
+    return back(to if to.startswith("/t") else "/t",
+                "Natijalar e'lon qilindi: o'quvchilar ball va izohlarni ko'radi" if on else "Natijalar o'quvchilardan yashirildi")
+
+
+@app.post("/t/window")
+def teacher_window(u=Depends(require("teacher")), conn=Depends(get_db),
+                   open_at: str = Form(""), close_at: str = Form(""), clear: str = Form("")):
+    try:
+        o, c = (0, 0) if clear else (parse_local(open_at), parse_local(close_at))
+    except ValueError:
+        return back("/t/settings#window", "Sana yoki vaqt noto'g'ri kiritildi")
+    if o and c and c <= o:
+        return back("/t/settings#window", "Yopilish vaqti ochilish vaqtidan keyin bo'lishi kerak")
+    conn.execute("BEGIN")
+    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('open_at',?)", (str(o),))
+    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('close_at',?)", (str(c),))
+    cut = 0
+    if c:  # yozayotganlarning vaqti ham yopilish vaqtidan oshmaydi
+        cut = conn.execute("UPDATE attempts SET deadline=? WHERE submitted_at IS NULL AND deadline>?", (c, c)).rowcount
+    conn.execute("COMMIT")
+    _settings["t"] = 0
+    if clear:
+        return back("/t/settings#window", "Vaqt cheklovi olib tashlandi: imtihon doim ochiq")
+    msg = "Imtihon vaqti saqlandi" + (f": {fmt_ts(o, '%d.%m %H:%M')} da ochiladi" if o else "") + \
+          (f", {fmt_ts(c, '%d.%m %H:%M')} da yopiladi" if c else "") + (f". {cut} ta yozayotgan talaba vaqti qisqardi" if cut else "")
+    return back("/t/settings#window", msg)
+
+
+@app.post("/t/password")
+def teacher_password(request: Request, u=Depends(require("teacher")), conn=Depends(get_db),
+                     current: str = Form(...), new: str = Form(...), confirm: str = Form(...)):
+    if not secrets.compare_digest(u["pw_hash"], hash_pw(current, u["salt"])):
+        return back("/t/settings#security", "Joriy parol noto'g'ri")
+    if new != confirm:
+        return back("/t/settings#security", "Yangi parol va takrori mos emas")
+    if len(new) < 8 or new.isdigit() or new.isalpha():
+        return back("/t/settings#security", "Parol kamida 8 belgi bo'lsin va harf hamda raqamdan iborat bo'lsin")
+    salt = secrets.token_hex(16)
+    conn.execute("BEGIN")
+    conn.execute("UPDATE users SET salt=?, pw_hash=?, pw_plain=NULL WHERE id=?", (salt, hash_pw(new, salt), u["id"]))
+    # boshqa qurilmalardagi ustoz sessiyalari yopiladi, joriy sessiya qoladi
+    conn.execute("DELETE FROM sessions WHERE user_id=? AND token<>?", (u["id"], request.cookies.get("sid", "")))
+    conn.execute("COMMIT")
+    return back("/t/settings#security", "Parol o'zgartirildi. Boshqa qurilmalardagi ustoz sessiyalari yopildi")
+
+
+# ---- zaxira ----
+_BK_NAME = re.compile(r"^nazorat_(kunlik|qolda)_[0-9_-]+\.db$")
+
+
+def make_backup(kind="qolda"):
+    """SQLite backup API: ishlayotgan bazaning izchil nusxasi (yozuvchilarni to'xtatmaydi)."""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = fmt_ts(time.time(), "%Y-%m-%d" if kind == "kunlik" else "%Y-%m-%d_%H-%M-%S")
+    dst = BACKUP_DIR / f"nazorat_{kind}_{stamp}.db"
+    tmp = dst.with_suffix(".tmp")
+    src = sqlite3.connect(DB_PATH, timeout=30)
+    out = sqlite3.connect(str(tmp))
+    try:
+        src.backup(out)
+        out.execute("PRAGMA journal_mode=DELETE")
+    finally:
+        out.close()
+        src.close()
+    os.replace(tmp, dst)
+    for k, keep in (("kunlik", BACKUP_KEEP), ("qolda", 10)):
+        for old in sorted(BACKUP_DIR.glob(f"nazorat_{k}_*.db"))[:-keep]:
+            old.unlink(missing_ok=True)
+    return dst.name
+
+
+def list_backups():
+    if not BACKUP_DIR.is_dir():
+        return []
+    files = [f for f in BACKUP_DIR.iterdir() if _BK_NAME.match(f.name)]
+    return [{"name": f.name, "kb": max(1, f.stat().st_size // 1024), "ts": int(f.stat().st_mtime),
+             "kind": "Kunlik" if "_kunlik_" in f.name else "Qo'lda"}
+            for f in sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)]
+
+
+def backup_loop():
+    """Har kuni bitta avtomatik zaxira. Bir nechta worker bo'lsa fayl qulfi bilan faqat bittasi yozadi."""
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    time.sleep(20)
+    while True:
+        try:
+            if not (BACKUP_DIR / f"nazorat_kunlik_{fmt_ts(time.time(), '%Y-%m-%d')}.db").exists():
+                BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+                with open(BACKUP_DIR / ".lock", "w") as lock:
+                    if fcntl:
+                        fcntl.flock(lock, fcntl.LOCK_EX)
+                    if not (BACKUP_DIR / f"nazorat_kunlik_{fmt_ts(time.time(), '%Y-%m-%d')}.db").exists():
+                        print("[nazorat] kunlik zaxira:", make_backup("kunlik"), flush=True)
+        except Exception as e:  # zaxira xatosi ilovani to'xtatmasin
+            print("[nazorat] zaxira xatosi:", e, flush=True)
+        time.sleep(600)
+
+
+@app.post("/t/backup")
+def teacher_backup(u=Depends(require("teacher"))):
+    name = make_backup("qolda")
+    return back("/t/settings#backup", f"Zaxira olindi: {name}")
+
+
+@app.get("/t/backup/{name}")
+def teacher_backup_file(name: str, u=Depends(require("teacher"))):
+    f = BACKUP_DIR / name
+    if not _BK_NAME.match(name) or not f.is_file():
+        return back("/t/settings#backup", "Zaxira fayli topilmadi")
+    return FileResponse(f, media_type="application/octet-stream", filename=name)
+
+
+# ---- Excel hisobot ----
+@app.get("/t/export.xlsx")
+def teacher_export_xlsx(u=Depends(require("teacher")), conn=Depends(get_db)):
+    from openpyxl import Workbook
+    from openpyxl.chart import BarChart, Reference
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    rows, stats = results_data(conn)
+    cfg = load_cfg(conn)
+    qn, mq = cfg["q_count"], cfg["max_per_q"]
+    mx = qn * mq
+    scores = {}
+    for r in conn.execute("SELECT attempt_id, pos, score FROM attempt_q"):
+        scores.setdefault(r["attempt_id"], {})[r["pos"]] = r["score"]
+    extra = {r["id"]: r for r in conn.execute("SELECT id, deduct, comment FROM attempts")}
+
+    title = cfg["exam_title"] or "Nazorat ishi"
+    head_fill = PatternFill("solid", fgColor="1F3A5F")
+    head_font = Font(bold=True, color="FFFFFF")
+    thin = Side(style="thin", color="C9D1DD")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    gfill = {5: "D1FAE5", 4: "DBEAFE", 3: "FEF3C7", 2: "FEE2E2"}
+    sfill = {"Baholangan": "D1FAE5", "Tekshirilmagan": "FEF3C7", "Chetlatilgan": "FEE2E2", "Yozmoqda": "E0E7FF"}
+
+    def table(ws, top, headers, data, widths):
+        ws.cell(row=1, column=1, value=title).font = Font(bold=True, size=14)
+        ws.cell(row=2, column=1, value=f"Hisobot: {fmt_ts(time.time(), '%d.%m.%Y %H:%M')} · maks. ball {mx}").font = Font(color="6B7280")
+        for j, h in enumerate(headers, 1):
+            c = ws.cell(row=top, column=j, value=h)
+            c.fill, c.font, c.border = head_fill, head_font, box
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.row_dimensions[top].height = 32
+        for i, row in enumerate(data, top + 1):
+            for j, v in enumerate(row, 1):
+                c = ws.cell(row=i, column=j, value=v)
+                c.border = box
+                c.alignment = Alignment(vertical="center", wrap_text=isinstance(v, str) and len(v) > 40)
+        for j, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(j)].width = w
+        ws.freeze_panes = ws.cell(row=top + 1, column=1)
+        if data:
+            ws.auto_filter.ref = f"A{top}:{get_column_letter(len(headers))}{top + len(data)}"
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Natijalar"
+    heads = ["№", "Guruh", "F.I.Sh.", "Login", "Holat", "Urinish"] + [f"{k}-savol" for k in range(1, qn + 1)] + \
+            ["Jarima", "Chegirma", f"Yakuniy ball ({mx})", "Baho", "Ogohlantirish", "Boshladi", "Yubordi", "Ustoz izohi"]
+    data = []
+    for n, r in enumerate(rows, 1):
+        sc = scores.get(r["aid"], {})
+        ex = extra.get(r["aid"])
+        g = grade_of(r["total"], mx) if r["graded"] else None
+        data.append([n, r["grp"] or "", r["name"], r["login"], r["state"], r["try_no"] or None]
+                    + [sc.get(k) if r["graded"] else None for k in range(1, qn + 1)]
+                    + [(ex["deduct"] or None) if ex and r["graded"] else None, r["carry"] or None,
+                       r["total"] if r["graded"] else None, g, r["viol"] if r["aid"] else None,
+                       fmt_ts(r["started_at"], "%d.%m.%Y %H:%M") if r["started_at"] else None,
+                       fmt_ts(r["submitted_at"], "%d.%m.%Y %H:%M") if r["submitted_at"] else None,
+                       (ex["comment"] or None) if ex else None])
+    table(ws, 4, heads, data, [5, 9, 34, 22, 15, 8] + [8] * qn + [8, 9, 12, 7, 12, 16, 16, 40])
+    gcol, tcol, scol = 6 + qn + 4, 6 + qn + 3, 5
+    for i, row in enumerate(data, 5):
+        st = row[4]
+        if st in sfill:
+            ws.cell(row=i, column=scol).fill = PatternFill("solid", fgColor=sfill[st])
+        g = row[gcol - 1]
+        if g:
+            c = ws.cell(row=i, column=gcol)
+            c.fill, c.font = PatternFill("solid", fgColor=gfill[g]), Font(bold=True)
+            c.alignment = Alignment(horizontal="center")
+        ws.cell(row=i, column=tcol).font = Font(bold=True)
+        for j in range(7, 7 + qn + 3):
+            ws.cell(row=i, column=j).number_format = "0.##"
+
+    # guruhlar
+    wg = wb.create_sheet("Guruhlar")
+    gdata = []
+    for grp in sorted({r["grp"] or "—" for r in rows}, key=lambda g: [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", g)]):
+        gr = [r for r in rows if (r["grp"] or "—") == grp]
+        tt = [r["total"] for r in gr if r["graded"]]
+        gg = [grade_of(t, mx) for t in tt]
+        gdata.append([grp, len(gr), sum(1 for r in gr if r["state"] in STATES[2:]), len(tt),
+                      round(sum(tt) / len(tt), 1) if tt else None, max(tt) if tt else None, min(tt) if tt else None,
+                      gg.count(5), gg.count(4), gg.count(3), gg.count(2),
+                      round(sum(1 for g in gg if g >= 3) / len(gg) * 100) if gg else None])
+    table(wg, 4, ["Guruh", "Talabalar", "Topshirdi", "Baholandi", "O'rtacha", "Eng yuqori", "Eng past",
+                  "5", "4", "3", "2", "O'zlashtirish %"], gdata, [12, 11, 11, 11, 10, 11, 10, 6, 6, 6, 6, 15])
+
+    # baholar va taqsimot (diagramma bilan)
+    wd = wb.create_sheet("Taqsimot")
+    tt = [r["total"] for r in rows if r["graded"]]
+    step = mx / 10 if mx else 10
+    bins = []
+    for i in range(10):
+        lo, hi = i * step, (i + 1) * step
+        bins.append([f"{lo:g}–{hi:g}", sum(1 for t in tt if lo <= t < hi or (i == 9 and t >= hi))])
+    table(wd, 4, ["Ball oralig'i", "Talabalar soni"], bins, [16, 16])
+    gl = [["5 (a'lo)", 0], ["4 (yaxshi)", 0], ["3 (qoniqarli)", 0], ["2 (qoniqarsiz)", 0]]
+    for t in tt:
+        gl[5 - grade_of(t, mx)][1] += 1
+    for j, h in enumerate(["Baho", "Soni"], 4):
+        c = wd.cell(row=4, column=j, value=h)
+        c.fill, c.font, c.border = head_fill, head_font, box
+    for i, (k, v) in enumerate(gl, 5):
+        wd.cell(row=i, column=4, value=k).border = box
+        wd.cell(row=i, column=5, value=v).border = box
+    wd.column_dimensions["D"].width, wd.column_dimensions["E"].width = 16, 10
+    if tt:
+        ch = BarChart()
+        ch.title, ch.y_axis.title, ch.x_axis.title = "Ballar taqsimoti", "Talabalar", "Ball"
+        ch.add_data(Reference(wd, min_col=2, min_row=4, max_row=14), titles_from_data=True)
+        ch.set_categories(Reference(wd, min_col=1, min_row=5, max_row=14))
+        ch.legend = None
+        ch.height, ch.width = 8, 16
+        wd.add_chart(ch, "G4")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    fname = f"natijalar_{fmt_ts(time.time(), '%Y-%m-%d_%H-%M')}.xlsx"
+    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
 
 
 init_db()

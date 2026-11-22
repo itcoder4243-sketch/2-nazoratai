@@ -5,7 +5,22 @@
 <div class="phead">
   <div><h1>Dashboard</h1><p class="mut">{{ cfg.exam_title or 'Nazorat ishi' }} · yangilandi {{ now_s }}</p></div>
   <div class="acts"><label class="chk" style="margin:0"><input type="checkbox" id="auto"> Avto yangilash (30 s)</label>
-    <a class="btn sec sm" href="/t">Yangilash</a></div>
+    <a class="btn sec sm" href="/t">Yangilash</a> <a class="btn sm" href="/t/export.xlsx">Excel hisobot</a></div>
+</div>
+
+<div class="notes">
+  <div class="note {{ 'ok' if cfg.results_published else 'warn' }}">
+    <div><b>Natijalar: {{ "e'lon qilingan" if cfg.results_published else 'yashirin' }}</b>
+      <span class="mut">{{ "O'quvchilar ball va izohlarni ko'rmoqda" if cfg.results_published else "O'quvchilar faqat «Ish yuborildi» deb ko'radi" }}</span></div>
+    <form method="post" action="/t/publish" {% if not cfg.results_published %}onsubmit="return confirm('Natijalar barcha o'quvchilarga ko'rinadi. Davom etasizmi?')"{% endif %}>
+      <input type="hidden" name="on" value="{{ 0 if cfg.results_published else 1 }}">
+      <button class="sm {{ 'sec' if cfg.results_published else 'ok' }}">{{ 'Yashirish' if cfg.results_published else "E'lon qilish" }}</button></form>
+  </div>
+  <div class="note {{ 'ok' if win.state == 'open' else 'warn' if win.state == 'before' else 'bad' }}">
+    <div><b>Imtihon: {{ {'open': 'ochiq', 'before': 'hali ochilmagan', 'closed': 'yopilgan'}[win.state] }}</b>
+      <span class="mut">{% if win.state == 'before' %}{{ win.open_at|dtf }} da ochiladi{% elif win.close_at and win.state == 'open' %}{{ win.close_at|dtf }} da yopiladi{% elif win.state == 'closed' %}{{ win.close_at|dtf }} da yopildi{% else %}Vaqt cheklovi yo'q{% endif %}</span></div>
+    <a class="btn sec sm" href="/t/settings#window">Sozlash</a>
+  </div>
 </div>
 
 <div class="kpis">
