@@ -41,3 +41,12 @@ cd /opt/nazoratai && sudo git pull && sudo systemctl restart nazoratai
 sudo sqlite3 /opt/nazoratai/data/nazorat.db ".backup /root/nazorat_$(date +%F_%H%M).db"
 ```
 Imtihon kuni ertalab va tugagandan keyin zaxira oling.
+
+## Railway orqali (eng oson)
+1. Railway'da GitHub reposini ulang. Ishga tushirish buyrug'i kerak emas: Railway `uvicorn main:app` ni o'zi ishlatadi.
+2. **Volume** qo'shing, mount path: `/data`.
+3. O'zgaruvchilar: `NAZORAT_DB=/data/nazorat.db`, `COOKIE_SECURE=1`, `WEB_CONCURRENCY=4`, `FORWARDED_ALLOW_IPS=*`, `TEACHER_PASSWORD=...`
+4. Real bazani yuklash: `railway volume files upload data/nazorat.db /restore.db`, keyin `railway redeploy`.
+   `main.py` ishga tushishda `restore.db` ni asosiy baza o'rniga qo'yadi va eskisini `nazorat_oldingi_*.db` nomi bilan saqlab qo'yadi.
+5. Zaxira olish: `railway volume files download /nazorat.db ./zaxira.db` (agar `nazorat.db-wal` bo'lsa, uni ham yuklab oling).
+6. Domen: `railway domain sizning-domen.uz`. Chiqqan CNAME va TXT yozuvlarini DNS panelingizga kiriting.
