@@ -1,0 +1,6 @@
+# Matn fayllari repoda LF bilan saqlanadi (Linux serverda muammosiz ishlaydi)
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary

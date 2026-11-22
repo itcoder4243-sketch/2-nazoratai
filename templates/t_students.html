@@ -1,23 +1,46 @@
 {% extends "base_t.html" %}
 {% block body %}
 <main>
+<div class="card noprint" style="margin-bottom:18px">
+<h2>Bitta talaba qo'shish</h2>
+<form method="post" action="/t/students/one">
+<div class="row tight">
+<div style="grid-column:span 2"><label>F.I.Sh.</label><input name="name" required placeholder="FAMILIYA ISM OTASINING ISMI"></div>
+<div><label>Guruh</label><input name="grp" list="grps" placeholder="masalan 306"></div>
+<div><label>Login (ixtiyoriy)</label><input name="login" placeholder="avtomatik: familiya.ism"></div>
+<div><label>Parol (ixtiyoriy)</label><input name="password" placeholder="avtomatik"></div>
+<div style="align-self:end"><button>Qo'shish</button></div>
+</div>
+</form>
+<datalist id="grps">{% for g in groups %}<option>{{ g }}</option>{% endfor %}</datalist>
+</div>
+
+<details class="card noprint" style="margin-bottom:18px">
+<summary style="cursor:pointer"><b>Ro'yxat bilan qo'shish (ko'p talaba)</b></summary>
+<form method="post" action="/t/students/add" style="margin-top:12px">
+<label>Har qatorga bitta talaba: <code>Ism; login; parol; guruh</code>. Faqat ism yetarli, qolgani avtomatik. Excel'dan ustunlarni nusxalab qo'ysangiz ham bo'ladi.</label>
+<textarea name="text" required placeholder="ALIYEV VALI KARIMOVICH&#10;KARIMOVA DILNOZA; karimova.dilnoza; dilnoza123&#10;TOSHMATOV JASUR;;;307"></textarea>
+<div class="row tight"><div><label>Guruh (qatorda ko'rsatilmaganlar uchun)</label><input name="grp" list="grps"></div>
+<div style="align-self:end"><button>Qo'shish</button></div></div>
+</form></details>
+
 <div class="card" style="margin-bottom:18px">
-<h2>Talabalar qo'shish</h2>
-<form method="post" action="/t/students/add">
-<label>Har bir qatorga bitta talaba. Faqat ism yozsangiz login va parol avtomatik yaratiladi. Xohlasangiz: Ism; login; parol</label>
-<textarea name="text" required placeholder="Ali Valiyev&#10;Dilnoza Karimova&#10;Jasur Toshmatov; jasur; 12345"></textarea>
-<p><button>Qo'shish</button></p>
-</form></div>
-<div class="card" style="margin-bottom:18px">
-<div style="display:flex;justify-content:space-between"><h2>Ro'yxat ({{ st|length }})</h2><button class="sec" onclick="window.print()">Chop etish</button></div>
-<table><tr><th>Guruh</th><th>Ism</th><th>Login</th><th>Parol</th><th class="noprint"></th></tr>
+<div class="bar"><h2>Ro'yxat ({{ st|length }})</h2>
+<div class="acts noprint"><a class="btn sec sm" data-grp-link="/t/students.csv" href="/t/students.csv">Login-parollar (CSV)</a>
+<button class="sec sm" onclick="window.print()">Chop etish</button></div></div>
+<div class="filters" data-filter="#stl">
+  <input data-f="q" type="search" placeholder="Ism yoki login bo'yicha qidirish...">
+  <select data-f="grp"><option value="">Barcha guruhlar</option>{% for g in groups %}<option>{{ g }}</option>{% endfor %}</select>
+  <span class="mut">Ko'rsatilmoqda: <b data-count>{{ st|length }}</b></span>
+</div>
+<div class="tbl"><table id="stl"><tr><th>Guruh</th><th>Ism</th><th>Login</th><th>Parol</th><th class="noprint">Holat</th><th class="noprint"></th></tr>
 {% for s in st %}
-<tr><td>{{ s.grp or "" }}</td><td>{{ s.name }}</td><td><code>{{ s.login }}</code></td><td><code>{{ s.pw_plain }}</code></td>
-<td><form method="post" action="/t/students/delete/{{ s.id }}" onsubmit="return confirm('O\'chiraymi? Natijalari ham o\'chadi.')"><button class="bad">×</button></form></td></tr>
-{% endfor %}</table></div>
+<tr data-q="{{ (s.name ~ ' ' ~ s.login)|lower }}" data-grp="{{ s.grp or '' }}" data-state="{{ s.state }}">
+<td>{{ s.grp or "" }}</td><td>{{ s.name }}</td><td><code>{{ s.login }}</code></td><td><code>{{ s.pw_plain or '' }}</code></td>
+<td class="noprint"><span class="tag {{ 'g' if s.state=='Baholangan' else 'y' if s.state in ('Tekshirilmagan','Yozmoqda') else 'r' if s.state=='Chetlatilgan' else '' }}">{{ s.state }}</span></td>
+<td class="noprint"><div class="acts"><a class="btn sec sm" href="/t/students/{{ s.id }}">Tahrirlash</a>
+<form class="inline" method="post" action="/t/students/delete/{{ s.id }}" onsubmit="return confirm('{{ s.name|e }} o\'chirilsinmi? Natijalari ham o\'chadi.')"><button class="bad sm" title="O'chirish">×</button></form></div></td></tr>
+{% endfor %}</table></div></div>
 </main>
-<style>@media print{.side,form,.noprint{display:none}body{display:block!important}}</style>
+<style>@media print{.side,form,.noprint{display:none!important}body{display:block!important}}</style>
 {% endblock %}
-
-
-

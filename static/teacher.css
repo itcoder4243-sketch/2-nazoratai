@@ -60,3 +60,48 @@ details summary{outline:0}
   .card{padding:16px;border-radius:14px}
 }
 @media print{body.t{background:#fff;--ink:#000;--mut:#555;--bd:#ccc;color:#000}.side{display:none}.card{background:#fff;box-shadow:none}code{background:#eee;color:#000}}
+
+/* ---- v2: xabar, filtr, kichik tugmalar ---- */
+.flash{max-width:1060px;margin:18px auto -8px;padding:12px 16px;border-radius:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;
+  background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.35);color:#a7f3d0}
+.content .flash{width:calc(100% - 56px)}
+.flash button{background:none;box-shadow:none;min-height:0;padding:0 6px;font-size:20px;color:inherit}
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px}
+.filters input,.filters select{width:auto;min-width:150px;flex:1 1 160px;padding:8px 11px}
+.filters .mut{flex:none}
+.bar{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;margin-bottom:12px}
+.bar h2{margin:0}
+.acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn.sm,button.sm{padding:6px 12px;min-height:34px;font-size:14px}
+.inline{display:inline}
+.tbl{overflow-x:auto}
+.row.tight{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+.chk{display:flex;gap:8px;align-items:center;color:var(--ink);margin:10px 0}
+.chk input{width:auto}
+.stat small{color:var(--mut);font-size:12px}
+details.ed summary{cursor:pointer;list-style:none;display:inline-block}
+details.ed summary::-webkit-details-marker{display:none}
+details.ed[open]{display:block;margin-top:8px}
+.hist{border:1px dashed var(--bd);border-radius:12px;padding:12px;margin-top:10px}
+@media(max-width:860px){.content .flash{width:calc(100% - 24px)}.filters input,.filters select{min-width:0}}
+@media print{.flash,.filters,.acts,.noprint{display:none!important}}
+
+/* ---- v3: jarayon, hodisalar, tez baholash ---- */
+.prog{display:flex;height:14px;border-radius:8px;overflow:hidden;background:rgba(255,255,255,.06);margin:4px 0 10px}
+.prog i,.legend i{display:block;height:100%}
+.s-k{background:#64748b}.s-y{background:#7c83ff}.s-t{background:#fbbf24}.s-c{background:#fb7185}.s-b{background:#34d399}
+.legend{display:flex;flex-wrap:wrap;gap:6px}
+.lgd{background:rgba(255,255,255,.05);box-shadow:none;border:1px solid var(--bd);color:var(--ink);font-weight:400;font-size:13px;min-height:32px;padding:4px 10px;display:inline-flex;align-items:center;gap:7px}
+.lgd i{width:10px;height:10px;border-radius:3px}
+.lgd b{font-weight:700}
+.feed{border-top:1px solid var(--bd);margin-top:14px;padding-top:10px;max-height:260px;overflow:auto}
+.ev{display:flex;justify-content:space-between;gap:10px;padding:6px 4px;border-radius:8px;color:var(--ink);text-decoration:none;font-size:14px}
+.ev:hover{background:rgba(255,255,255,.05)}
+.ev i{font-style:normal;display:inline-block;width:22px}
+.ev.ban i{color:#fb7185}.ev.warn i{color:#fbbf24}.ev.sent i{color:#34d399}.ev.start i{color:#7c83ff}
+.qs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.qs button{background:rgba(255,255,255,.06);box-shadow:none;border:1px solid var(--bd);color:var(--ink);min-height:36px;min-width:44px;padding:4px 10px}
+.qs button.on{border:2px solid #7c83ff;color:#c9d0ff;background:rgba(124,131,255,.18)}
+.gbar{position:sticky;bottom:0;z-index:5;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
+  background:rgba(14,19,38,.92);backdrop-filter:blur(10px);border:1px solid var(--bd);border-radius:14px;padding:12px 16px;margin-bottom:18px}
+.gbar .tot{font-size:20px;font-weight:700}

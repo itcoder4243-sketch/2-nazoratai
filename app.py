@@ -1,15 +1,25 @@
-"""Nazorat ishi tizimi: FastAPI + SQLite. Yengil, bitta fayl."""
+"""NazoratAI: onlayn nazorat ishi tizimi. FastAPI + SQLite, yengil, bitta fayl.
+
+Copyright (c) 2026 SoliyevNurbek (Nurbek Soliyev). Barcha huquqlar himoyalangan.
+Ruxsatsiz nusxalash, tarqatish yoki tijoriy foydalanish taqiqlanadi (LICENSE ga qarang).
+"""
 import csv
 import hashlib
 import io
+import json
 import os
 import re
 import secrets
+import queue
 import sqlite3
+import threading
 import time
+import unicodedata
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import Body, Depends, FastAPI, Form, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -30,11 +40,35 @@ def _load_dotenv(path):
 
 _load_dotenv(BASE / ".env")
 DB_PATH = os.environ.get("NAZORAT_DB") or str(BASE / "data" / "nazorat.db")
+# HTTPS (domen) orqali ishlaganda 1: sessiya cookie faqat shifrlangan ulanishda yuboriladi
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0") == "1"
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Nazorat ishi", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
+app.add_middleware(GZipMiddleware, minimum_size=1200)  # tunnel/internet orqali sahifalar 5-10 barobar kichik
+
+
+class StaticCache:
+    """css fayllar ?v=N bilan versiyalangan: brauzer har sahifada qayta so`ramaydi.
+    Toza ASGI (BaseHTTPMiddleware har so`rovga sezilarli kechikish qo`shadi)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/static/"):
+            return await self.app(scope, receive, send)
+
+        async def send2(msg):
+            if msg["type"] == "http.response.start":
+                msg["headers"] = list(msg.get("headers", [])) + [(b"cache-control", b"public, max-age=86400")]
+            await send(msg)
+        await self.app(scope, receive, send2)
+
+
+app.add_middleware(StaticCache)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
@@ -62,18 +96,52 @@ def connect():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA synchronous=NORMAL")  # WAL bilan xavfsiz; har yozuvda diskni kutmaydi (HDD da juda muhim)
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA cache_size=-8000")
+    # checkpoint (WAL -> asosiy fayl, diskka fsync) so`rov ichida emas, fon oqimida bajariladi
+    conn.execute("PRAGMA wal_autocheckpoint=0")
     return conn
+
+
+_pool = queue.LifoQueue()
+
+
+def checkpointer():
+    """Fon oqimi: har 2 soniyada PASSIVE checkpoint. Yozuvchilarni bloklamaydi, so`rovlar diskni kutmaydi."""
+    conn = sqlite3.connect(DB_PATH, timeout=15, isolation_level=None, check_same_thread=False)
+    while True:
+        time.sleep(2)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        except sqlite3.Error:
+            pass
 
 
 def init_db():
     conn = connect()
     conn.execute("PRAGMA journal_mode=WAL")  # bir marta: bazaga yoziladi va saqlanib qoladi
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.executescript(SCHEMA)
     for ddl in ("ALTER TABLE violations ADD COLUMN penalty INTEGER DEFAULT 0",
                 "ALTER TABLE attempts ADD COLUMN disq INTEGER DEFAULT 0",
                 "ALTER TABLE attempts ADD COLUMN deduct REAL DEFAULT 0",
                 "ALTER TABLE users ADD COLUMN grp TEXT",
-                "CREATE TABLE IF NOT EXISTS assigned(user_id INTEGER NOT NULL, question_id INTEGER NOT NULL, pos INTEGER NOT NULL, PRIMARY KEY(user_id, question_id))"):
+                "CREATE TABLE IF NOT EXISTS assigned(user_id INTEGER NOT NULL, question_id INTEGER NOT NULL, pos INTEGER NOT NULL, PRIMARY KEY(user_id, question_id))",
+                # qayta topshirish: keyingi urinishdan ayriladigan chegirma va eski urinishlar tarixi
+                "ALTER TABLE users ADD COLUMN carry REAL DEFAULT 0",
+                "ALTER TABLE users ADD COLUMN retakes INTEGER DEFAULT 0",
+                "ALTER TABLE attempts ADD COLUMN carry REAL DEFAULT 0",
+                "ALTER TABLE attempts ADD COLUMN try_no INTEGER DEFAULT 1",
+                "CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, ts INTEGER, carry REAL, data TEXT)",
+                # indekslar: har saqlash/panel so`rovi butun jadvalni ko`rib chiqmasligi uchun
+                "CREATE INDEX IF NOT EXISTS ix_aq_attempt ON attempt_q(attempt_id)",
+                "CREATE INDEX IF NOT EXISTS ix_aq_question ON attempt_q(question_id)",
+                "CREATE INDEX IF NOT EXISTS ix_viol_attempt ON violations(attempt_id, penalty, ts)",
+                "CREATE INDEX IF NOT EXISTS ix_assigned_q ON assigned(question_id)",
+                "CREATE INDEX IF NOT EXISTS ix_hist_user ON history(user_id)",
+                "CREATE INDEX IF NOT EXISTS ix_sess_user ON sessions(user_id)",
+                "CREATE INDEX IF NOT EXISTS ix_att_sub ON attempts(submitted_at)",
+                "CREATE INDEX IF NOT EXISTS ix_att_start ON attempts(started_at)"):
         try:
             conn.execute(ddl)
         except sqlite3.OperationalError:
@@ -85,7 +153,9 @@ def init_db():
         add_user(conn, "teacher", "Ustoz", "ustoz", pw, keep_plain=False)
         if not os.environ.get("TEACHER_PASSWORD"):
             print(f"\n[!] Ustoz paroli yaratildi: login=ustoz parol={pw}\n")
+    conn.execute("ANALYZE")
     conn.close()
+    threading.Thread(target=checkpointer, daemon=True).start()
 
 
 PBKDF2_ITERS = 10_000  # 100k bu kompyuterda ~200 ms/kirish edi: 200 kishi bir vaqtda kirsa 20+ soniya kutadi
@@ -104,16 +174,49 @@ def add_user(conn, role, name, login, pw, keep_plain=True):
 
 
 def get_db():
-    conn = connect()
+    # ulanishlar qayta ishlatiladi (har so`rovda yangi ulanish + PRAGMA ochilmaydi)
+    try:
+        conn = _pool.get_nowait()
+    except queue.Empty:
+        conn = connect()
     try:
         yield conn
     finally:
-        conn.close()
+        try:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            if _pool.qsize() < 64:
+                _pool.put(conn)
+            else:
+                conn.close()
+        except sqlite3.Error:
+            conn.close()
+
+
+_settings = {"t": 0.0, "v": {}}
+
+
+def _all_settings(conn):
+    # sozlamalar har so`rovda 5-10 marta o`qiladi: xotirada 2 soniya saqlanadi (har worker o`zida), o`zgartirilganda darhol yangilanadi
+    if time.time() - _settings["t"] > 2:
+        _settings["v"] = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+        _settings["t"] = time.time()
+    return _settings["v"]
 
 
 def setting(conn, key):
-    r = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-    return int(r["value"]) if r else int(DEFAULTS[key])
+    v = _all_settings(conn).get(key)
+    return int(v) if v not in (None, "") else int(DEFAULTS[key])
+
+
+def setting_s(conn, key, default=""):
+    return _all_settings(conn).get(key) or default
+
+
+def login_page(request, conn, error=None):
+    return render(request, "login.html", error=error, title=setting_s(conn, "exam_title", "Nazorat ishi"),
+                  minutes=setting(conn, "duration_min"), q_count=setting(conn, "q_count"),
+                  penalty=setting(conn, "penalty_points"), max_strikes=setting(conn, "max_strikes"))
 
 
 class Redir(Exception):
@@ -166,6 +269,40 @@ def grade_of(total, max_total):
 
 templates.env.globals["grade_of"] = grade_of
 templates.env.filters["dt"] = lambda t: time.strftime("%d.%m %H:%M", time.localtime(t)) if t else "-"
+templates.env.filters["tm"] = lambda t: time.strftime("%H:%M", time.localtime(t)) if t else "-"
+templates.env.filters["num"] = lambda x: ("%g" % round(x or 0, 1))
+
+
+def back(url, msg=None):
+    return RedirectResponse(url + (("&" if "?" in url else "?") + "msg=" + quote(msg) if msg else ""), status_code=303)
+
+
+def slug(s):
+    for ch in "‘’ʻʼ'`":
+        s = s.replace(ch, "")
+    s = s.replace("Ǵ", "G").replace("ǵ", "g")
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return "".join(c for c in s.lower() if c.isalnum())
+
+
+def gen_pw(name):
+    parts = name.split()
+    first = slug(parts[1]) if len(parts) > 1 else slug(parts[0]) if parts else ""
+    return f"{first or 'talaba'}{secrets.randbelow(900) + 100}"
+
+
+def pick_questions(conn, n, avoid=(), hard=()):
+    """Eng kam ishlatilgan savollardan n ta: avval `avoid` va `hard` dan tashqari, yetmasa `avoid` dan ham."""
+    out = []
+    for excl in (set(avoid) | set(hard), set(hard)):
+        if len(out) >= n:
+            break
+        ex = excl | set(out)
+        where = f"WHERE id NOT IN ({','.join('?' * len(ex))})" if ex else ""
+        out += [r["id"] for r in conn.execute(
+            f"SELECT id FROM questions {where} ORDER BY used ASC, RANDOM() LIMIT ?",
+            (*ex, n - len(out)))]
+    return out
 
 # ---------------- umumiy ----------------
 _fails = {}
@@ -176,7 +313,7 @@ def index(request: Request, conn=Depends(get_db)):
     u = current_user(request, conn)
     if u:
         return RedirectResponse("/t" if u["role"] == "teacher" else "/s", status_code=303)
-    return render(request, "login.html", error=None)
+    return login_page(request, conn)
 
 
 @app.post("/login")
@@ -187,19 +324,19 @@ def login(request: Request, login: str = Form(...), password: str = Form(...), c
     key = login.strip().lower()
     recent = [t for t in _fails.get(key, []) if now - t < 300]
     if len(recent) >= 8:
-        return render(request, "login.html", error="Juda ko'p urinish. 5 daqiqadan keyin qayta urining.")
+        return login_page(request, conn, "Juda ko'p urinish. 5 daqiqadan keyin qayta urining.")
     u = conn.execute("SELECT * FROM users WHERE login=?", (login.strip().lower(),)).fetchone()
     if not u or not secrets.compare_digest(u["pw_hash"], hash_pw(password, u["salt"])):
         recent.append(now)
         _fails[key] = recent
-        return render(request, "login.html", error="Login yoki parol noto'g'ri")
+        return login_page(request, conn, "Login yoki parol noto'g'ri")
     tok = secrets.token_urlsafe(32)
     conn.execute("BEGIN")
     conn.execute("DELETE FROM sessions WHERE user_id=?", (u["id"],))  # bitta qurilma
     conn.execute("INSERT INTO sessions(token,user_id,created) VALUES(?,?,?)", (tok, u["id"], int(now)))
     conn.execute("COMMIT")
-    r = RedirectResponse("/", status_code=303)
-    r.set_cookie("sid", tok, httponly=True, samesite="lax", max_age=60 * 60 * 12)
+    r = RedirectResponse("/t" if u["role"] == "teacher" else "/s", status_code=303)  # "/" orqali ortiqcha aylanmasiz
+    r.set_cookie("sid", tok, httponly=True, samesite="lax", max_age=60 * 60 * 12, secure=COOKIE_SECURE)
     return r
 
 
@@ -245,21 +382,22 @@ def student_start(u=Depends(require("student")), conn=Depends(get_db)):
     try:
         if not conn.execute("SELECT 1 FROM attempts WHERE user_id=?", (u["id"],)).fetchone():
             n = setting(conn, "q_count")
-            # eng kam ishlatilgan savollardan tasodifiy: takrorlanish minimal
-            rows = conn.execute("SELECT question_id AS id FROM assigned WHERE user_id=? ORDER BY pos", (u["id"],)).fetchall()
-            if not rows:  # oldindan biriktirilmagan bo`lsa: eng kam ishlatilganlardan tasodifiy
-                rows = conn.execute("SELECT id FROM questions ORDER BY used ASC, RANDOM() LIMIT ?", (n,)).fetchall()
-            if len(rows) < n:
+            # oldindan biriktirilganlar; savollar soni o`zgargan bo`lsa kesiladi yoki eng kam ishlatilganlar bilan to`ldiriladi
+            ids = [r["question_id"] for r in conn.execute(
+                "SELECT question_id FROM assigned WHERE user_id=? ORDER BY pos", (u["id"],))][:n]
+            if len(ids) < n:
+                ids += pick_questions(conn, n - len(ids), hard=ids)
+            if len(ids) < n:
                 conn.execute("ROLLBACK")
                 return RedirectResponse("/s", status_code=303)
             now = int(time.time())
             cur = conn.execute(
-                "INSERT INTO attempts(user_id,started_at,deadline) VALUES(?,?,?)",
-                (u["id"], now, now + setting(conn, "duration_min") * 60))
+                "INSERT INTO attempts(user_id,started_at,deadline,carry,try_no) VALUES(?,?,?,?,?)",
+                (u["id"], now, now + setting(conn, "duration_min") * 60, u["carry"] or 0, (u["retakes"] or 0) + 1))
             aid = cur.lastrowid
-            for i, r in enumerate(rows, 1):
-                conn.execute("INSERT INTO attempt_q(attempt_id,question_id,pos) VALUES(?,?,?)", (aid, r["id"], i))
-                conn.execute("UPDATE questions SET used=used+1 WHERE id=?", (r["id"],))
+            for i, qid in enumerate(ids, 1):
+                conn.execute("INSERT INTO attempt_q(attempt_id,question_id,pos) VALUES(?,?,?)", (aid, qid, i))
+                conn.execute("UPDATE questions SET used=used+1 WHERE id=?", (qid,))
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -276,7 +414,7 @@ def student_exam(request: Request, u=Depends(require("student")), conn=Depends(g
         "SELECT aq.id, aq.pos, aq.answer, q.text FROM attempt_q aq JOIN questions q ON q.id=aq.question_id "
         "WHERE attempt_id=? ORDER BY pos", (att["id"],)).fetchall()
     return render(request, "s_exam.html", user=u, att=att, items=items,
-                  remaining=max(0, att["deadline"] - int(time.time())),
+                  remaining=max(0, att["deadline"] - int(time.time())), total=att["deadline"] - att["started_at"],
                   strikes=strike_count(conn, att["id"]), max_strikes=setting(conn, "max_strikes"),
                   penalty=setting(conn, "penalty_points"))
 
@@ -287,19 +425,23 @@ def api_save(data: dict = Body(...), u=Depends(require("student")), conn=Depends
     att = get_attempt(conn, u["id"])
     if not att or att["submitted_at"] is not None:
         return JSONResponse({"ok": False, "submitted": True})
+    answers = [(str(v)[:6000], int(k)) for k, v in (data.get("answers") or {}).items() if str(k).isdigit()]
+    if not answers and not data.get("final"):  # o`zgarish yo`q: faqat qolgan vaqt (bazaga yozilmaydi)
+        return JSONResponse({"ok": True, "submitted": False, "remaining": max(0, att["deadline"] - int(time.time()))})
     conn.execute("BEGIN")
     try:
-        for k, v in (data.get("answers") or {}).items():
-            if str(k).isdigit():
-                conn.execute("UPDATE attempt_q SET answer=? WHERE id=? AND attempt_id=?",
-                             (str(v)[:6000], int(k), att["id"]))
-        if data.get("final"):
+        # bir xil matn qayta yozilmaydi (IS NOT): diskka yozuv faqat haqiqiy o`zgarishda
+        conn.executemany("UPDATE attempt_q SET answer=? WHERE id=? AND attempt_id=? AND answer IS NOT ?",
+                         [(a, i, att["id"], a) for a, i in answers])
+        # taymer tugadi deb kelgan avtomatik yuborish: ustoz vaqt qo`shgan bo`lsa yubormaymiz
+        final = bool(data.get("final")) and not (data.get("auto") and att["deadline"] > time.time() + 3)
+        if final:
             conn.execute("UPDATE attempts SET submitted_at=? WHERE id=?", (int(time.time()), att["id"]))
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
-    if data.get("final"):
+    if final:
         return JSONResponse({"ok": True, "submitted": True})
     return JSONResponse({"ok": True, "submitted": False, "remaining": max(0, att["deadline"] - int(time.time()))})
 
@@ -331,66 +473,141 @@ def strike_count(conn, aid):
 
 
 # ---------------- ustoz ----------------
+def state_of(r):
+    return ("Kirmagan" if not r["aid"] else "Yozmoqda" if r["submitted_at"] is None
+            else "Baholangan" if r["graded"] else "Chetlatilgan" if r["disq"] else "Tekshirilmagan")
+
+
 @app.get("/t")
 def teacher_home(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
     rows = conn.execute(
-        "SELECT u.id uid, u.name, u.login, a.id aid, a.started_at, a.deadline, a.submitted_at, a.total, a.graded, a.disq, "
+        "SELECT u.id uid, u.name, u.login, u.grp, u.carry ucarry, a.id aid, a.started_at, a.deadline, a.submitted_at, "
+        "a.total, a.graded, a.disq, a.carry, a.try_no, "
         "(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.penalty=1) viol "
-        "FROM users u LEFT JOIN attempts a ON a.user_id=u.id WHERE u.role='student' ORDER BY u.name").fetchall()
+        "FROM users u LEFT JOIN attempts a ON a.user_id=u.id WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
     rows = [dict(r) for r in rows]
     now = time.time()
     for r in rows:
         if r["aid"] and r["submitted_at"] is None and now > r["deadline"]:
             conn.execute("UPDATE attempts SET submitted_at=? WHERE id=?", (r["deadline"], r["aid"]))
             r["submitted_at"] = r["deadline"]
-        r["state"] = ("Kirmagan" if not r["aid"] else "Yozmoqda" if r["submitted_at"] is None
-                      else "Baholangan" if r["graded"] else "Chetlatilgan" if r["disq"] else "Tekshirilmagan")
+        r["state"] = state_of(r)
+        r["left"] = max(0, int((r["deadline"] - now) // 60)) if r["state"] == "Yozmoqda" else None
+    cnt = {s: sum(1 for r in rows if r["state"] == s)
+           for s in ("Kirmagan", "Yozmoqda", "Tekshirilmagan", "Chetlatilgan", "Baholangan")}
+    graded = [r["total"] for r in rows if r["graded"]]
     stats = {
         "students": len(rows),
         "questions": conn.execute("SELECT COUNT(*) c FROM questions").fetchone()["c"],
-        "pending": sum(1 for r in rows if r["state"] in ("Tekshirilmagan", "Chetlatilgan")),
-        "graded": sum(1 for r in rows if r["state"] == "Baholangan"),
+        "pending": cnt["Tekshirilmagan"] + cnt["Chetlatilgan"],
+        "graded": cnt["Baholangan"], "cnt": cnt,
+        "avg": sum(graded) / len(graded) if graded else None,
     }
     cfg = {k: setting(conn, k) for k in DEFAULTS}
-    return render(request, "t_home.html", user=u, rows=rows, stats=stats, cfg=cfg,
-                  mx_total=cfg["max_per_q"] * cfg["q_count"])
+    cfg["exam_title"] = setting_s(conn, "exam_title")
+    disq_n = conn.execute("SELECT COUNT(*) c FROM attempts WHERE disq=1").fetchone()["c"]
+    groups = sorted({r["grp"] for r in rows if r["grp"]})
+    return render(request, "t_home.html", user=u, rows=rows, stats=stats, cfg=cfg, groups=groups,
+                  mx_total=cfg["max_per_q"] * cfg["q_count"], disq_n=disq_n, events=recent_events(conn),
+                  now_s=time.strftime("%H:%M:%S"))
+
+
+def recent_events(conn, limit=12):
+    """So`nggi hodisalar: jarimali chiqishlar, chetlatish, yuborish, boshlash."""
+    ms = setting(conn, "max_strikes")
+    ev = []
+    for r in conn.execute(
+            "SELECT v.ts, v.kind, a.id aid, u.name, (SELECT COUNT(*) FROM violations w WHERE w.attempt_id=v.attempt_id "
+            "AND w.penalty=1 AND w.ts<=v.ts) n FROM violations v JOIN attempts a ON a.id=v.attempt_id "
+            "JOIN users u ON u.id=a.user_id WHERE v.penalty=1 ORDER BY v.ts DESC LIMIT ?", (limit,)):
+        ev.append((r["ts"], "ban" if r["n"] >= ms else "warn", r["aid"],
+                   f"{r['name']} " + (f"chetlatildi ({r['n']}/{ms})" if r["n"] >= ms else f"oynadan chiqdi ({r['n']}/{ms})")))
+    for r in conn.execute("SELECT a.id aid, a.submitted_at ts, u.name FROM attempts a JOIN users u ON u.id=a.user_id "
+                          "WHERE a.submitted_at IS NOT NULL AND a.disq=0 ORDER BY a.submitted_at DESC LIMIT ?", (limit,)):
+        ev.append((r["ts"], "sent", r["aid"], f"{r['name']} ishni yubordi"))
+    for r in conn.execute("SELECT a.id aid, a.started_at ts, u.name FROM attempts a JOIN users u ON u.id=a.user_id "
+                          "ORDER BY a.started_at DESC LIMIT ?", (limit,)):
+        ev.append((r["ts"], "start", r["aid"], f"{r['name']} boshladi"))
+    ev.sort(key=lambda e: e[0], reverse=True)
+    return [dict(ts=e[0], kind=e[1], aid=e[2], text=e[3]) for e in ev[:limit]]
 
 
 @app.post("/t/settings")
 def teacher_settings(u=Depends(require("teacher")), conn=Depends(get_db),
                      duration_min: int = Form(60), q_count: int = Form(5),
                      max_per_q: int = Form(20), penalty_points: int = Form(10),
-                     max_strikes: int = Form(3)):
-    for k, v in dict(duration_min=duration_min, q_count=q_count, max_per_q=max_per_q,
+                     max_strikes: int = Form(3), exam_title: str = Form("")):
+    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('exam_title',?)", (" ".join(exam_title.split())[:120],))
+    for k, v in dict(duration_min=max(1, duration_min), q_count=max(1, q_count), max_per_q=max(1, max_per_q),
                      penalty_points=penalty_points, max_strikes=max(1, max_strikes)).items():
         conn.execute("UPDATE settings SET value=? WHERE key=?", (str(max(0, v)), k))
-    return RedirectResponse("/t", status_code=303)
+    _settings["t"] = 0
+    return back("/t", "Sozlamalar saqlandi")
 
 
+# ---- savollar ----
 @app.get("/t/questions")
 def teacher_questions(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
-    qs = conn.execute("SELECT * FROM questions ORDER BY id").fetchall()
+    qs = conn.execute(
+        "SELECT q.*, (SELECT COUNT(*) FROM assigned a WHERE a.question_id=q.id) asg, "
+        "(SELECT COUNT(*) FROM attempt_q aq WHERE aq.question_id=q.id) given FROM questions q ORDER BY q.id").fetchall()
     return render(request, "t_questions.html", user=u, qs=qs)
 
 
 @app.post("/t/questions/import")
 def teacher_q_import(u=Depends(require("teacher")), conn=Depends(get_db), text: str = Form(...)):
+    have = {" ".join(r["text"].split()).lower() for r in conn.execute("SELECT text FROM questions")}
+    added = dup = 0
     for line in text.splitlines():
         line = line.strip()
-        if line:
-            conn.execute("INSERT INTO questions(text) VALUES(?)", (line[:2000],))
-    return RedirectResponse("/t/questions", status_code=303)
+        key = " ".join(line.split()).lower()
+        if not line:
+            continue
+        if key in have:
+            dup += 1
+            continue
+        have.add(key)
+        conn.execute("INSERT INTO questions(text) VALUES(?)", (line[:2000],))
+        added += 1
+    return back("/t/questions", f"{added} ta savol qo'shildi" + (f", {dup} ta takror o'tkazib yuborildi" if dup else ""))
+
+
+@app.post("/t/questions/edit/{qid}")
+def teacher_q_edit(qid: int, u=Depends(require("teacher")), conn=Depends(get_db), text: str = Form(...)):
+    text = text.strip()
+    if text:
+        conn.execute("UPDATE questions SET text=? WHERE id=?", (text[:2000], qid))
+    return RedirectResponse(f"/t/questions?msg={quote(f'{qid}-savol yangilandi')}#q{qid}", status_code=303)
 
 
 @app.post("/t/questions/delete/{qid}")
 def teacher_q_delete(qid: int, u=Depends(require("teacher")), conn=Depends(get_db)):
-    if not conn.execute("SELECT 1 FROM attempt_q WHERE question_id=?", (qid,)).fetchone():
+    if conn.execute("SELECT 1 FROM attempt_q WHERE question_id=?", (qid,)).fetchone():
+        return back("/t/questions", "Bu savolga talaba javob yozgan, o'chirib bo'lmaydi (tahrirlash mumkin)")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        moved = 0
+        # biriktirilgan talabalarga o`rniga boshqa (ularda yo`q) savol
+        for a in conn.execute("SELECT user_id, pos FROM assigned WHERE question_id=?", (qid,)).fetchall():
+            mine = [r["question_id"] for r in conn.execute("SELECT question_id FROM assigned WHERE user_id=?", (a["user_id"],))]
+            new = pick_questions(conn, 1, hard=set(mine) | {qid})
+            conn.execute("DELETE FROM assigned WHERE user_id=? AND question_id=?", (a["user_id"], qid))
+            if new:
+                conn.execute("INSERT INTO assigned(user_id,question_id,pos) VALUES(?,?,?)", (a["user_id"], new[0], a["pos"]))
+                conn.execute("UPDATE questions SET used=used+1 WHERE id=?", (new[0],))
+                moved += 1
         conn.execute("DELETE FROM questions WHERE id=?", (qid,))
-    return RedirectResponse("/t/questions", status_code=303)
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return back("/t/questions", f"Savol o'chirildi" + (f"; {moved} talabaga o'rniga boshqa savol berildi" if moved else ""))
 
 
+# ---- talabalar ----
 def make_login(conn, name):
-    base = re.sub(r"[^a-z0-9]", "", name.lower().replace("'", "").replace("ʻ", "").split()[0]) or "talaba"
+    parts = name.split()
+    base = ".".join(p for p in (slug(parts[0]) if parts else "", slug(parts[1]) if len(parts) > 1 else "") if p) or "talaba"
     login, i = base, 1
     while conn.execute("SELECT 1 FROM users WHERE login=?", (login,)).fetchone():
         i += 1
@@ -398,27 +615,90 @@ def make_login(conn, name):
     return login
 
 
+def create_student(conn, name, grp=None, login=None, pw=None):
+    name = " ".join(name.split())
+    login = (login or "").strip().lower() or make_login(conn, name)
+    if not re.fullmatch(r"[a-z0-9._-]{2,60}", login):
+        return None, f"Login noto'g'ri: {login} (faqat lotin harf, raqam, . _ -)"
+    if conn.execute("SELECT 1 FROM users WHERE login=?", (login,)).fetchone():
+        return None, f"Login band: {login}"
+    pw = (pw or "").strip() or gen_pw(name)
+    add_user(conn, "student", name, login, pw)
+    conn.execute("UPDATE users SET grp=? WHERE login=?", ((grp or "").strip() or None, login))
+    return login, None
+
+
 @app.get("/t/students")
 def teacher_students(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
-    st = conn.execute("SELECT * FROM users WHERE role='student' ORDER BY name").fetchall()
-    return render(request, "t_students.html", user=u, st=st)
+    st = conn.execute(
+        "SELECT u.*, a.id aid, a.submitted_at, a.graded, a.disq FROM users u LEFT JOIN attempts a ON a.user_id=u.id "
+        "WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
+    st = [dict(s, state=state_of(s)) for s in st]
+    groups = sorted({s["grp"] for s in st if s["grp"]})
+    return render(request, "t_students.html", user=u, st=st, groups=groups)
+
+
+@app.post("/t/students/one")
+def teacher_student_one(u=Depends(require("teacher")), conn=Depends(get_db), name: str = Form(...),
+                        grp: str = Form(""), login: str = Form(""), password: str = Form("")):
+    lg, err = create_student(conn, name, grp, login, password)
+    return back("/t/students", err or f"Qo'shildi: {name} — login {lg}")
 
 
 @app.post("/t/students/add")
-def teacher_students_add(u=Depends(require("teacher")), conn=Depends(get_db), text: str = Form(...)):
-    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+def teacher_students_add(u=Depends(require("teacher")), conn=Depends(get_db), text: str = Form(...), grp: str = Form("")):
+    """Har qator: Ism; login; parol; guruh  (Excel'dan nusxa bo`lsa tab bilan ham bo`ladi). Faqat ism ham yetadi."""
+    added, errs = 0, []
     for line in text.splitlines():
-        parts = [p.strip() for p in line.split(";")]
-        if not parts[0]:
+        parts = [p.strip() for p in re.split(r"[;\t]", line)]
+        if not parts or not parts[0]:
             continue
-        name = parts[0]
-        login = parts[1].lower() if len(parts) > 1 and parts[1] else make_login(conn, name)
-        pw = parts[2] if len(parts) > 2 and parts[2] else "".join(secrets.choice(alphabet) for _ in range(6))
-        try:
-            add_user(conn, "student", name, login, pw)
-        except sqlite3.IntegrityError:
-            pass
-    return RedirectResponse("/t/students", status_code=303)
+        g = parts[3] if len(parts) > 3 and parts[3] else grp
+        lg, err = create_student(conn, parts[0], g, parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else "")
+        if err:
+            errs.append(err)
+        else:
+            added += 1
+    return back("/t/students", f"{added} ta talaba qo'shildi" + (f"; {len(errs)} ta xato: " + "; ".join(errs[:5]) if errs else ""))
+
+
+@app.get("/t/students/{uid}")
+def teacher_student(uid: int, request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+    s = conn.execute("SELECT * FROM users WHERE id=? AND role='student'", (uid,)).fetchone()
+    if not s:
+        return back("/t/students")
+    att = conn.execute("SELECT * FROM attempts WHERE user_id=?", (uid,)).fetchone()
+    asg = conn.execute("SELECT a.pos, q.id, q.text FROM assigned a JOIN questions q ON q.id=a.question_id "
+                       "WHERE a.user_id=? ORDER BY a.pos", (uid,)).fetchall()
+    hist = [dict(h, d=json.loads(h["data"])) for h in
+            conn.execute("SELECT * FROM history WHERE user_id=? ORDER BY ts", (uid,))]
+    return render(request, "t_student.html", user=u, s=s, att=att, asg=asg, hist=hist)
+
+
+@app.post("/t/students/{uid}/edit")
+def teacher_student_edit(uid: int, u=Depends(require("teacher")), conn=Depends(get_db), name: str = Form(...),
+                         grp: str = Form(""), login: str = Form(...)):
+    login = login.strip().lower()
+    if not re.fullmatch(r"[a-z0-9._-]{2,60}", login):
+        return back(f"/t/students/{uid}", "Login noto'g'ri (faqat lotin harf, raqam, . _ -)")
+    if conn.execute("SELECT 1 FROM users WHERE login=? AND id<>?", (login, uid)).fetchone():
+        return back(f"/t/students/{uid}", f"Login band: {login}")
+    conn.execute("UPDATE users SET name=?, grp=?, login=? WHERE id=? AND role='student'",
+                 (" ".join(name.split()), grp.strip() or None, login, uid))
+    return back(f"/t/students/{uid}", "Saqlandi")
+
+
+@app.post("/t/students/{uid}/password")
+def teacher_student_pw(uid: int, u=Depends(require("teacher")), conn=Depends(get_db), password: str = Form("")):
+    s = conn.execute("SELECT * FROM users WHERE id=? AND role='student'", (uid,)).fetchone()
+    if not s:
+        return back("/t/students")
+    pw = password.strip() or gen_pw(s["name"])
+    salt = secrets.token_hex(16)
+    conn.execute("UPDATE users SET salt=?, pw_hash=?, pw_plain=? WHERE id=?", (salt, hash_pw(pw, salt), pw, uid))
+    conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+    _fails.pop(s["login"], None)
+    return back(f"/t/students/{uid}", f"Yangi parol: {pw}")
 
 
 @app.post("/t/students/delete/{uid}")
@@ -429,25 +709,45 @@ def teacher_student_delete(uid: int, u=Depends(require("teacher")), conn=Depends
         conn.execute("DELETE FROM violations WHERE attempt_id=?", (att["id"],))
         conn.execute("DELETE FROM attempt_q WHERE attempt_id=?", (att["id"],))
         conn.execute("DELETE FROM attempts WHERE id=?", (att["id"],))
+    conn.execute("DELETE FROM assigned WHERE user_id=?", (uid,))
+    conn.execute("DELETE FROM history WHERE user_id=?", (uid,))
     conn.execute("DELETE FROM users WHERE id=? AND role='student'", (uid,))
-    return RedirectResponse("/t/students", status_code=303)
+    return back("/t/students", "Talaba o'chirildi")
 
 
+@app.get("/t/students.csv")
+def teacher_students_csv(grp: str = "", u=Depends(require("teacher")), conn=Depends(get_db)):
+    q = "SELECT grp, name, login, pw_plain FROM users WHERE role='student'" + (" AND grp=?" if grp else "") + " ORDER BY grp, name"
+    out = io.StringIO()
+    w = csv.writer(out, delimiter=";")
+    w.writerow(["Guruh", "F.I.Sh.", "Login", "Parol"])
+    for r in conn.execute(q, (grp,) if grp else ()):
+        w.writerow([r["grp"] or "", r["name"], r["login"], r["pw_plain"] or ""])
+    return Response("﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=login_parollar{('_' + slug(grp)) if grp else ''}.csv"})
+
+
+# ---- urinish: tekshirish, qayta topshirish, vaqt ----
 @app.get("/t/attempt/{aid}")
 def teacher_attempt(aid: int, request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
-    att = conn.execute("SELECT a.*, u.name, u.login FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.id=?",
-                       (aid,)).fetchone()
+    q = "SELECT a.*, u.name, u.login, u.grp FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.id=?"
+    att = conn.execute(q, (aid,)).fetchone()
     if not att:
-        return RedirectResponse("/t", status_code=303)
-    att = finalize_if_expired(conn, att) and conn.execute(
-        "SELECT a.*, u.name, u.login FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.id=?", (aid,)).fetchone()
+        return back("/t", "Urinish topilmadi (qayta topshirishga ruxsat berilgan bo'lishi mumkin)")
+    finalize_if_expired(conn, att)
+    att = conn.execute(q, (aid,)).fetchone()
     items = conn.execute(
         "SELECT aq.*, q.text FROM attempt_q aq JOIN questions q ON q.id=aq.question_id WHERE attempt_id=? ORDER BY pos",
         (aid,)).fetchall()
     viol = conn.execute("SELECT * FROM violations WHERE attempt_id=? ORDER BY ts", (aid,)).fetchall()
     strikes = strike_count(conn, aid)
+    hist = [dict(h, d=json.loads(h["data"])) for h in
+            conn.execute("SELECT * FROM history WHERE user_id=? ORDER BY ts", (att["user_id"],))]
     return render(request, "t_attempt.html", user=u, att=att, items=items, viol=viol, mx=setting(conn, "max_per_q"),
-                  strikes=strikes, deduct=calc_deduct(conn, att, strikes))
+                  strikes=strikes, deduct=calc_deduct(conn, att, strikes), hist=hist,
+                  suggest=default_carry(conn, att), left=max(0, int((att["deadline"] - time.time()) // 60)),
+                  todo=conn.execute("SELECT COUNT(*) c FROM attempts WHERE graded=0 AND submitted_at IS NOT NULL").fetchone()["c"],
+                  carry=att["carry"] or 0)
 
 
 def calc_deduct(conn, att, strikes):
@@ -456,9 +756,17 @@ def calc_deduct(conn, att, strikes):
     return pp * min(strikes, ms - 1)
 
 
+def default_carry(conn, att):
+    """Qayta topshirishda taklif qilinadigan chegirma: oldingi chegirma + jarima x ogohlantirishlar."""
+    return (att["carry"] or 0) + setting(conn, "penalty_points") * strike_count(conn, att["id"])
+
+
 @app.post("/t/attempt/{aid}/grade")
 async def teacher_grade(aid: int, request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
     form = await request.form()
+    att = conn.execute("SELECT * FROM attempts WHERE id=?", (aid,)).fetchone()
+    if not att:
+        return back("/t", "Urinish topilmadi")
     mx = setting(conn, "max_per_q")
     total = 0.0
     for r in conn.execute("SELECT id FROM attempt_q WHERE attempt_id=?", (aid,)).fetchall():
@@ -470,38 +778,151 @@ async def teacher_grade(aid: int, request: Request, u=Depends(require("teacher")
         total += sc
         conn.execute("UPDATE attempt_q SET score=?, comment=? WHERE id=?",
                      (sc, str(form.get(f"comment_{r['id']}", ""))[:1500], r["id"]))
-    att = conn.execute("SELECT * FROM attempts WHERE id=?", (aid,)).fetchone()
     deduct = calc_deduct(conn, att, strike_count(conn, aid))
-    final = 0.0 if att["disq"] else max(0.0, total - deduct)
+    final = 0.0 if att["disq"] else max(0.0, total - deduct - (att["carry"] or 0))
     conn.execute("UPDATE attempts SET total=?, deduct=?, comment=?, graded=1, graded_at=? WHERE id=?",
                  (final, deduct, str(form.get("comment", ""))[:2000], int(time.time()), aid))
-    return RedirectResponse("/t", status_code=303)
+    if form.get("next"):
+        nxt = next_ungraded(conn, aid)
+        if nxt:
+            return back(f"/t/attempt/{nxt}", "Baholandi. Keyingi ish ochildi")
+        return back("/t", "Baholandi. Tekshirilmagan ish qolmadi")
+    return back("/t", "Baholandi")
+
+
+def next_ungraded(conn, aid=None):
+    """Tekshirilmagan (yuborilgan, baholanmagan) keyingi ish: guruh va ism tartibida, joriydan keyin."""
+    rows = [r["id"] for r in conn.execute(
+        "SELECT a.id FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.graded=0 AND "
+        "(a.submitted_at IS NOT NULL OR a.deadline < ?) ORDER BY u.grp, u.name", (int(time.time()),))]
+    if aid in rows:
+        i = rows.index(aid)
+        rows = rows[i + 1:] + rows[:i]
+    return rows[0] if rows else None
+
+
+def do_retake(conn, aid, carry=None, new_q=True):
+    """Eski urinishni tarixga ko`chiradi va talabaga qayta topshirishga ruxsat beradi.
+    carry: keyingi natijadan ayriladigan ball (None = default_carry)."""
+    att = conn.execute("SELECT * FROM attempts WHERE id=?", (aid,)).fetchone()
+    if not att:
+        return None
+    uid = att["user_id"]
+    items = [dict(r) for r in conn.execute(
+        "SELECT aq.question_id, aq.pos, aq.answer, aq.score, aq.comment, q.text FROM attempt_q aq "
+        "JOIN questions q ON q.id=aq.question_id WHERE attempt_id=? ORDER BY pos", (aid,))]
+    snap = dict(att, strikes=strike_count(conn, aid), items=items,
+                violations=[dict(r) for r in conn.execute("SELECT ts, kind, penalty FROM violations WHERE attempt_id=? ORDER BY ts", (aid,))])
+    carry = default_carry(conn, att) if carry is None else max(0.0, carry)
+    conn.execute("INSERT INTO history(user_id,ts,carry,data) VALUES(?,?,?,?)",
+                 (uid, int(time.time()), carry, json.dumps(snap, ensure_ascii=False)))
+    if new_q:
+        seen = {i["question_id"] for i in items}
+        for h in conn.execute("SELECT data FROM history WHERE user_id=?", (uid,)):
+            seen |= {i["question_id"] for i in json.loads(h["data"]).get("items", [])}
+        new = pick_questions(conn, setting(conn, "q_count"), avoid=seen)
+        conn.execute("DELETE FROM assigned WHERE user_id=?", (uid,))
+        for pos, qid in enumerate(new, 1):
+            conn.execute("INSERT INTO assigned(user_id,question_id,pos) VALUES(?,?,?)", (uid, qid, pos))
+    elif not conn.execute("SELECT 1 FROM assigned WHERE user_id=?", (uid,)).fetchone():
+        for i in items:
+            conn.execute("INSERT INTO assigned(user_id,question_id,pos) VALUES(?,?,?)", (uid, i["question_id"], i["pos"]))
+    conn.execute("DELETE FROM violations WHERE attempt_id=?", (aid,))
+    conn.execute("DELETE FROM attempt_q WHERE attempt_id=?", (aid,))
+    conn.execute("DELETE FROM attempts WHERE id=?", (aid,))
+    conn.execute("UPDATE users SET carry=?, retakes=COALESCE(retakes,0)+1 WHERE id=?", (carry, uid))
+    return uid
+
+
+def parse_carry(v):
+    v = str(v or "").strip().replace(",", ".")
+    try:
+        return float(v) if v else None
+    except ValueError:
+        return None
+
+
+@app.post("/t/attempt/{aid}/retake")
+def teacher_retake(aid: int, u=Depends(require("teacher")), conn=Depends(get_db),
+                   carry: str = Form(""), new_q: str = Form("")):
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        uid = do_retake(conn, aid, parse_carry(carry), bool(new_q))
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    if not uid:
+        return back("/t", "Urinish topilmadi")
+    c = conn.execute("SELECT name, carry FROM users WHERE id=?", (uid,)).fetchone()
+    return back("/t", f"{c['name']}: qayta topshirishga ruxsat berildi, chegirma -{c['carry']:g} ball")
 
 
 @app.post("/t/attempt/{aid}/reset")
 def teacher_reset(aid: int, u=Depends(require("teacher")), conn=Depends(get_db)):
-    """Qayta topshirishga ruxsat: urinishni o'chiradi, savollar 'used' hisobi kamaytiriladi."""
-    for r in conn.execute("SELECT question_id FROM attempt_q WHERE attempt_id=?", (aid,)).fetchall():
-        conn.execute("UPDATE questions SET used=MAX(0,used-1) WHERE id=?", (r["question_id"],))
-    conn.execute("DELETE FROM violations WHERE attempt_id=?", (aid,))
-    conn.execute("DELETE FROM attempt_q WHERE attempt_id=?", (aid,))
-    conn.execute("DELETE FROM attempts WHERE id=?", (aid,))
-    return RedirectResponse("/t", status_code=303)
+    """Eski tugma: chegirmasiz, o'sha savollar bilan qayta topshirish."""
+    return teacher_retake(aid, u, conn, carry="0", new_q="")
+
+
+@app.post("/t/retake-disq")
+def teacher_retake_disq(u=Depends(require("teacher")), conn=Depends(get_db),
+                        carry: str = Form(""), new_q: str = Form(""), grp: str = Form("")):
+    c = parse_carry(carry)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        ids = [r["id"] for r in conn.execute(
+            "SELECT a.id FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.disq=1" + (" AND u.grp=?" if grp else ""),
+            (grp,) if grp else ())]
+        for aid in ids:
+            do_retake(conn, aid, c, bool(new_q))
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return back("/t", f"{len(ids)} ta chetlatilgan talabaga qayta topshirishga ruxsat berildi")
+
+
+@app.post("/t/attempt/{aid}/extend")
+def teacher_extend(aid: int, u=Depends(require("teacher")), conn=Depends(get_db), minutes: int = Form(10)):
+    """Vaqt qo`shish; yuborilgan yoki chetlatilgan (baholanmagan) ishni qayta ochish."""
+    att = conn.execute("SELECT * FROM attempts WHERE id=?", (aid,)).fetchone()
+    if not att:
+        return back("/t", "Urinish topilmadi")
+    if att["graded"]:
+        return back(f"/t/attempt/{aid}", "Baholangan ishni qayta ochib bo'lmaydi. Qayta topshirishdan foydalaning.")
+    minutes = max(1, min(600, minutes))
+    now = int(time.time())
+    deadline = max(att["deadline"], now) + minutes * 60
+    if att["disq"]:
+        # chetlatishni bekor qilish: oxirgi jarimalar "kechirildi" (penalty=2), keyingi chiqishda yana chetlatiladi
+        extra = strike_count(conn, aid) - (setting(conn, "max_strikes") - 1)
+        if extra > 0:
+            conn.execute("UPDATE violations SET penalty=2 WHERE id IN (SELECT id FROM violations WHERE attempt_id=? "
+                         "AND penalty=1 ORDER BY ts DESC LIMIT ?)", (aid, extra))
+    conn.execute("UPDATE attempts SET deadline=?, submitted_at=NULL, disq=0 WHERE id=?", (deadline, aid))
+    msg = f"+{minutes} daqiqa qo'shildi" + (" va ish qayta ochildi" if att["submitted_at"] is not None else "")
+    return back(f"/t/attempt/{aid}", msg)
 
 
 @app.get("/t/export.csv")
 def teacher_export(u=Depends(require("teacher")), conn=Depends(get_db)):
     rows = conn.execute(
-        "SELECT u.name, u.login, a.total, a.comment, a.graded, "
+        "SELECT u.grp, u.name, u.login, a.submitted_at, a.total, a.comment, a.graded, a.disq, a.deduct, a.carry, a.try_no, "
         "(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.penalty=1) viol "
-        "FROM users u JOIN attempts a ON a.user_id=u.id ORDER BY u.name").fetchall()
+        "FROM users u LEFT JOIN attempts a ON a.user_id=u.id WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
     mx = setting(conn, "max_per_q") * setting(conn, "q_count")
     out = io.StringIO()
-    w = csv.writer(out)
-    w.writerow(["Ism", "Login", "Ball", f"Maks({mx})", "Baho", "Izoh", "Jarima hodisalari"])
+    w = csv.writer(out, delimiter=";")
+    w.writerow(["Guruh", "Ism", "Login", "Holat", "Urinish", "Ball", f"Maks({mx})", "Baho", "Ogohlantirish",
+                "Jarima", "Qayta topshirish chegirmasi", "Izoh"])
     for r in rows:
-        w.writerow([r["name"], r["login"], r["total"] if r["graded"] else "", mx,
-                    grade_of(r["total"], mx) if r["graded"] else "", r["comment"] or "", r["viol"]])
+        st = ("Kirmagan" if r["try_no"] is None else "Yozmoqda" if r["submitted_at"] is None else "Chetlatilgan" if r["disq"] else
+              "Baholangan" if r["graded"] else "Tekshirilmagan")
+        w.writerow([r["grp"] or "", r["name"], r["login"], st, r["try_no"] or "",
+                    ("%g" % r["total"]) if r["graded"] else "", mx,
+                    grade_of(r["total"], mx) if r["graded"] else "", r["viol"] if r["try_no"] else "",
+                    ("%g" % r["deduct"]) if r["graded"] and r["deduct"] else "",
+                    ("%g" % r["carry"]) if r["carry"] else "", r["comment"] or ""])
     return Response("﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": "attachment; filename=natijalar.csv"})
 

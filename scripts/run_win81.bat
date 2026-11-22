@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-cd /d %~dp0
+cd /d %~dp0..
 if not exist .venv\Scripts\python.exe ( echo Avval setup_win81.bat ni ishga tushiring. & pause & exit /b 1 )
 echo.
 echo === Nazorat ishi serveri ===

@@ -2,8 +2,8 @@
 <html lang="uz"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ustoz paneli · Nazorat</title>
-<link rel="stylesheet" href="/static/style.css">
-<link rel="stylesheet" href="/static/teacher.css"></head>
+<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/teacher.css?v=4"></head>
 <body class="t">
 <div class="shell">
 <aside class="side">
@@ -17,6 +17,28 @@
   <div class="me"><div class="av">{{ user.name[:1] }}</div><div><b>{{ user.name }}</b><small>Administrator</small></div>
     <a href="/logout" title="Chiqish">{{ ic('logout') }}</a></div>
 </aside>
-<div class="content">{% block body %}{% endblock %}</div>
+<div class="content">
+{% set msg = request.query_params.get('msg') %}
+{% if msg %}<div class="flash" id="flash">{{ msg }}<button type="button" onclick="this.parentNode.remove()" aria-label="Yopish">×</button></div>{% endif %}
+{% block body %}{% endblock %}</div>
+<script>
+// jadval filtri: <input data-f="q">, <select data-f="grp|state"> va <tr data-q data-grp data-state>
+(function(){
+  const box=document.querySelector('[data-filter]'); if(!box)return;
+  const tbl=document.querySelector(box.dataset.filter), cnt=box.querySelector('[data-count]'), key='flt:'+location.pathname;
+  const ctl=[...box.querySelectorAll('[data-f]')];
+  try{const s=JSON.parse(localStorage.getItem(key)||'{}');ctl.forEach(c=>{if(s[c.dataset.f]!=null)c.value=s[c.dataset.f];});}catch(e){}
+  function run(){
+    const v={};ctl.forEach(c=>v[c.dataset.f]=c.value.trim().toLowerCase());
+    try{localStorage.setItem(key,JSON.stringify(v));}catch(e){}
+    let n=0;tbl.querySelectorAll('tr[data-q]').forEach(tr=>{
+      const ok=(!v.q||tr.dataset.q.includes(v.q))&&(!v.grp||tr.dataset.grp.toLowerCase()===v.grp)&&(!v.state||tr.dataset.state.toLowerCase()===v.state);
+      tr.style.display=ok?'':'none';if(ok)n++;});
+    if(cnt)cnt.textContent=n;
+    document.querySelectorAll('[data-grp-link]').forEach(a=>{a.href=a.dataset.grpLink+(v.grp?('?grp='+encodeURIComponent(box.querySelector('[data-f=grp]').value)):'');});
+  }
+  ctl.forEach(c=>c.addEventListener('input',run));run();
+})();
+</script>
 </div>
 </body></html>

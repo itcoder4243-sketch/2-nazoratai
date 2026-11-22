@@ -2,27 +2,43 @@
 {% block bodyclass %}noselect{% endblock %}
 {% block header %}{% endblock %}
 {% block body %}
-<div id="timer"><span>{{ user.name }}</span><b id="clock">--:--</b><span id="saved" class="mut">saqlandi</span></div>
+<div id="timer">
+<div class="who"><span class="av">{{ (user.name.split()|map('first')|list)[:2]|join }}</span>
+<span class="nm"><b>{{ user.name }}</b>{% if user.grp %}<small>{{ user.grp }}-guruh</small>{% endif %}</span></div>
+<div class="pills">
+<span id="spill" class="pl {{ 'w' if strikes else '' }}" title="Ogohlantirishlar">⚠ {{ strikes }} / {{ max_strikes }}</span>
+<span id="saved" class="pl ok">✓ saqlandi</span>
+<b id="clock">--:--</b></div>
+<div id="tbar"><i></i></div>
+</div>
 <canvas id="wmc" style="display:none"></canvas><div id="wm"></div>
 <div id="gate"><div>
 <h2 id="gtitle">To'liq ekran rejimida yozing</h2>
 <p id="gmsg">Imtihonni davom ettirish uchun tugmani bosing. Boshqa oynaga o'tish va nusxa olish ustozga ko'rinadi.</p>
 <button id="gbtn" class="ok">Davom etish</button>
 </div></div>
+<div class="exam">
+<nav id="qnav"><div class="mut lbl">Savollar</div>
+<div class="nums">{% for it in items %}<button type="button" class="qn" data-go="{{ loop.index0 }}">{{ it.pos }}</button>{% endfor %}</div>
+<div class="mut" id="qdone">0 / {{ items|length }} javob yozildi</div></nav>
 <main>
 <div class="card mut" id="warn" style="display:none;background:#fff3bf;color:#8a5a00"></div>
 {% for it in items %}
-<div class="card">
+<div class="card qc" id="qc{{ loop.index0 }}">
 <div class="mut">Savol {{ it.pos }} / {{ items|length }}</div>
 <div class="q">{{ it.text }}</div>
 <textarea data-id="{{ it.id }}" placeholder="Javobingizni o'zingiz yozing..." spellcheck="false" autocomplete="off">{{ it.answer }}</textarea>
+<div class="qfoot"><span class="mut cc">0 belgi</span>
+<span>{% if not loop.first %}<button type="button" class="sec sm" data-go="{{ loop.index0 - 1 }}">← Oldingi</button>{% endif %}
+{% if not loop.last %}<button type="button" class="sec sm" data-go="{{ loop.index0 + 1 }}">Keyingi →</button>{% endif %}</span></div>
 </div>
 {% endfor %}
 <p><button id="finish" class="ok">Ishni yuborish</button></p>
 </main>
+</div>
 <script>
 let STRIKES={{ strikes }}; const REMAIN={{ remaining }}, MAXS={{ max_strikes }}, PEN={{ penalty }}, WM="{{ user.name|e }} · {{ user.login|e }}";
-const end=Date.now()+REMAIN*1000;
+let end=Date.now()+REMAIN*1000, busy=false, TOTAL=Math.max({{ total }},REMAIN,1);
 const $=s=>document.querySelector(s), tas=[...document.querySelectorAll('textarea')];
 let done=false, armed=false;
 
@@ -35,10 +51,17 @@ $('#wm').style.background='url('+c.toDataURL()+')';})();
 // --- server bilan aloqa ---
 async function post(url,body){try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return await r.json();}catch(e){return null;}}
 function collect(){const a={};tas.forEach(t=>a[t.dataset.id]=t.value);return a;}
-async function save(final){
-  const r=await post('/api/save',{answers:collect(),final:!!final});
+// serverga faqat oxirgi muvaffaqiyatli saqlashdan beri o'zgargan javoblar yuboriladi; yakunda hammasi
+const sent={};tas.forEach(t=>sent[t.dataset.id]=t.value);
+function changed(){const a={};tas.forEach(t=>{if(sent[t.dataset.id]!==t.value)a[t.dataset.id]=t.value;});return a;}
+async function save(final,auto){
+  const a=final?collect():changed();
+  const r=await post('/api/save',{answers:a,final:!!final,auto:!!auto});
+  if(r&&r.ok)Object.assign(sent,a);
   if(r&&r.submitted){finish();return;}
-  $('#saved').textContent=r?'saqlandi '+new Date().toLocaleTimeString():'⚠ aloqa yo\'q';
+  if(r&&typeof r.remaining==='number')end=Date.now()+r.remaining*1000; // ustoz vaqt qo'shgan bo'lsa
+  $('#saved').textContent=r?'✓ saqlandi '+new Date().toLocaleTimeString().slice(0,5):'⚠ aloqa yo\'q';
+  $('#saved').className='pl '+(r?'ok':'bad');
 }
 function finish(){done=true;location.href='/s';}
 setInterval(()=>save(false),10000);
@@ -50,7 +73,8 @@ setInterval(async()=>{
   const s=Math.max(0,Math.round((end-Date.now())/1000));
   $('#clock').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
   $('#timer').classList.toggle('low',s<300);
-  if(s<=0&&!done){await save(true);finish();}
+  $('#tbar i').style.width=Math.min(100,Math.max(0,100-s/TOTAL*100))+'%';
+  if(s<=0&&!done&&!busy){busy=true;await save(true,true);busy=false;}
 },500);
 
 const gate=$('#gate');
@@ -65,6 +89,7 @@ async function violation(kind){
 }
 function showStrike(){
   const left=MAXS-STRIKES;
+  const sp=$('#spill');sp.textContent='⚠ '+STRIKES+' / '+MAXS;sp.className='pl '+(left<=1?'bad':'w');
   const w=$('#warn');w.style.display='block';
   w.textContent='⚠ Ogohlantirish '+STRIKES+' / '+MAXS+': oynadan chiqdingiz. Jarima: -'+(PEN*STRIKES)+' ball.';
   if(document.fullscreenElement||true){
@@ -106,6 +131,17 @@ document.addEventListener('fullscreenchange',()=>{
   if(!document.fullscreenElement){violation('exit_fullscreen');needFS('To\'liq ekrandan chiqdingiz. Davom etish uchun qayta kiring.');}});
 needFS();
 if(STRIKES>0)showStrike();
+
+// --- savol navigatsiyasi (faqat ko'rinish; himoya kodiga ta'sir qilmaydi) ---
+const navb=[...document.querySelectorAll('#qnav .qn')], cards=[...document.querySelectorAll('.qc')];
+function go(i){const c=cards[i];if(!c)return;c.scrollIntoView({behavior:'smooth',block:'start'});
+  navb.forEach((b,j)=>b.classList.toggle('cur',j===i));setTimeout(()=>{try{tas[i].focus({preventScroll:true});}catch(e){}},350);}
+document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>go(+b.dataset.go)));
+function marks(){let n=0;tas.forEach((t,i)=>{const ok=t.value.trim().length>0;if(ok)n++;navb[i]&&navb[i].classList.toggle('done',ok);
+  const cc=cards[i]&&cards[i].querySelector('.cc');if(cc)cc.textContent=t.value.length+' belgi';});
+  $('#qdone').textContent=n+' / '+tas.length+' javob yozildi';}
+tas.forEach(t=>t.addEventListener('input',marks));marks();
+if('IntersectionObserver' in window){const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){const i=cards.indexOf(e.target);navb.forEach((b,j)=>b.classList.toggle('cur',j===i));}}),{rootMargin:'-40% 0px -55% 0px'});cards.forEach(c=>io.observe(c));}
 </script>
 {% endblock %}
 

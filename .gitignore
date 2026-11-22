@@ -4,11 +4,14 @@
 !.env.example
 *.pem
 *.key
+*.crt
 token*
 secrets*
+credentials*
 
-# bazalar va ma'lumotlar (o'quvchilar, javoblar, parollar)
+# bazalar va real ma'lumotlar (o'quvchilar, javoblar, parollar, savollar)
 data/
+backup*/
 *.db
 *.db-*
 *.sqlite
@@ -17,9 +20,12 @@ data/
 *.xlsx
 *.xls
 *.docx
+*.zip
 state.json
+users*.json
+login_parol*
 
-# muhit va kesh
+# muhit, kesh va sinov natijalari
 .venv/
 venv/
 __pycache__/
@@ -27,6 +33,10 @@ __pycache__/
 *.log
 *.bak*
 .pytest_cache/
+perf/
+loadtest_*.txt
 .idea/
 .vscode/
+.claude/
 shots/
+*.exe

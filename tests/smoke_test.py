@@ -1,4 +1,6 @@
-import os, tempfile
+import os, sys, tempfile
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [ROOT, os.path.join(ROOT, "scripts")]
 os.environ["NAZORAT_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 os.environ["TEACHER_PASSWORD"] = "ustoz123"
 import seed_demo  # noqa

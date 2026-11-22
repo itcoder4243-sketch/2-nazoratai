@@ -1,5 +1,5 @@
 """Haqiqiy nazorat ishi ma'lumotlarini kiritadi: o'quvchilar (xlsx), savollar (docx).
-usage: import_data.py <nazorat_dir> <inputs_dir> <teacher_password> <out_dir>
+usage: python scripts/import_data.py <nazorat_dir> <inputs_dir> <teacher_password> <out_dir>
 Muhit o'zgaruvchisi PASSWORD_SALT majburiy (.env.example ga qarang): o'quvchi parollari login + shu tuzdan hosil qilinadi.
 Eski (demo) o'quvchilar, savollar, urinishlar o'chiriladi (DB oldin nusxalanadi)."""
 import collections, hashlib, itertools, json, random, shutil, sqlite3, sys, time, unicodedata, zipfile

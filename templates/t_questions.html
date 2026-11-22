@@ -1,21 +1,33 @@
 {% extends "base_t.html" %}
 {% block body %}
 <main>
-<div class="card" style="margin-bottom:18px">
-<h2>Savollar qo'shish</h2>
-<form method="post" action="/t/questions/import">
-<label>Har bir qatorga bitta savol (Word/Excel dan ustunni nusxalab qo'ysangiz bo'ladi)</label>
+<details class="card" style="margin-bottom:18px"{% if not qs %} open{% endif %}>
+<summary style="cursor:pointer"><b>Savollar qo'shish</b></summary>
+<form method="post" action="/t/questions/import" style="margin-top:12px">
+<label>Har qatorga bitta savol (Word/Excel'dan nusxalab qo'ysangiz bo'ladi). Bazada bor savollar qayta qo'shilmaydi.</label>
 <textarea name="text" required placeholder="1-savol matni&#10;2-savol matni&#10;..."></textarea>
 <p><button>Qo'shish</button></p>
-</form></div>
+</form></details>
+
 <div class="card" style="margin-bottom:18px">
-<h2>Baza: {{ qs|length }} ta savol</h2>
-<table><tr><th>#</th><th>Savol</th><th>Ishlatilgan</th><th></th></tr>
+<div class="bar"><h2>Baza: {{ qs|length }} ta savol</h2></div>
+<div class="filters" data-filter="#ql">
+  <input data-f="q" type="search" placeholder="Savol matni yoki raqami bo'yicha qidirish...">
+  <span class="mut">Ko'rsatilmoqda: <b data-count>{{ qs|length }}</b></span>
+</div>
+<p class="mut">"Biriktirilgan" — nechta talabaga oldindan tayinlangan; "Javob yozilgan" — nechta talaba bu savolni ochgan. Javob yozilgan savolni o'chirib bo'lmaydi, faqat tahrirlash mumkin. Biriktirilgan savol o'chirilsa, o'sha talabalarga o'rniga boshqa savol beriladi.</p>
+<div class="tbl"><table id="ql"><tr><th>#</th><th>Savol</th><th>Biriktirilgan</th><th>Javob yozilgan</th><th></th></tr>
 {% for q in qs %}
-<tr><td>{{ q.id }}</td><td>{{ q.text }}</td><td>{{ q.used }}</td>
-<td>{% if not q.used %}<form method="post" action="/t/questions/delete/{{ q.id }}" onsubmit="return confirm('O\'chiraymi?')"><button class="bad">×</button></form>{% endif %}</td></tr>
-{% endfor %}</table></div>
+<tr id="q{{ q.id }}" data-q="{{ q.id }} {{ q.text|lower }}" data-grp="" data-state="">
+<td>{{ q.id }}</td>
+<td>{{ q.text }}
+<details class="ed"><summary class="btn sec sm">Tahrirlash</summary>
+<form method="post" action="/t/questions/edit/{{ q.id }}">
+<textarea name="text" required style="min-height:90px">{{ q.text }}</textarea>
+{% if q.given %}<p class="mut">⚠ Bu savolni {{ q.given }} ta talaba ochgan: o'zgartirsangiz ularda ham yangi matn ko'rinadi.</p>{% endif %}
+<p><button class="sm">Saqlash</button></p></form></details></td>
+<td>{{ q.asg }}</td><td>{{ q.given }}</td>
+<td>{% if not q.given %}<form method="post" action="/t/questions/delete/{{ q.id }}" onsubmit="return confirm('{{ q.id }}-savol o\'chirilsinmi?{% if q.asg %} {{ q.asg }} ta talabaga o\'rniga boshqa savol beriladi.{% endif %}')"><button class="bad sm" title="O'chirish">×</button></form>{% endif %}</td></tr>
+{% endfor %}</table></div></div>
 </main>
 {% endblock %}
-
-

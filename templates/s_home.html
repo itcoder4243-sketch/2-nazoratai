@@ -10,6 +10,7 @@
 <li>Nusxa olish, qo'yish, skrinshot va boshqa oynaga o'tish taqiqlanadi, hammasi ustozga ko'rinadi.</li>
 <li>Javoblar avtomatik saqlanadi. Vaqt tugaganda ish o'zi yuboriladi.</li>
 </ul>
+{% if user.carry %}<p class="err">Bu qayta topshirish: yakuniy natijangizdan <b>{{ user.carry|num }} ball</b> chegiriladi.</p>{% endif %}
 <form method="post" action="/s/start"><button class="ok">Boshlash</button></form>
 </div>
 {% elif att.submitted_at is none %}
@@ -27,7 +28,8 @@
 <div class="stat"><span class="mut">Baho</span><b>{{ grade_of(att.total, mx * items|length) }}</b></div>
 </div>
 {% if att.disq %}<p class="err"><b>⛔ Nazoratdan chetlashtirilgansiz</b>: oynadan ko'p chiqqaningiz uchun natija 0.</p>
-{% elif att.deduct %}<p class="err">Jarima: <b>-{{ att.deduct|round(0)|int }} ball</b> (ruxsatsiz oynadan chiqqaningiz uchun).</p>{% endif %}
+{% else %}{% if att.deduct %}<p class="err">Jarima: <b>-{{ att.deduct|round(0)|int }} ball</b> (ruxsatsiz oynadan chiqqaningiz uchun).</p>{% endif %}
+{% if att.carry %}<p class="err">Qayta topshirish chegirmasi: <b>-{{ att.carry|num }} ball</b>.</p>{% endif %}{% endif %}
 {% if att.comment %}<h3>Ustozning izohi</h3><div class="ans">{{ att.comment }}</div>{% endif %}
 </div>
 {% for it in items %}

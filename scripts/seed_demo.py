@@ -1,5 +1,7 @@
 """Demo ma'lumot: 150 ta savol, 6 ta talaba, ustoz paroli ustoz123 (faqat demo uchun!)."""
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("TEACHER_PASSWORD", "ustoz123")
 import app
 

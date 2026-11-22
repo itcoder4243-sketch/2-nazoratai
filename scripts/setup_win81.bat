@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-cd /d %~dp0
+cd /d %~dp0..
 echo === Nazorat ishi: o'rnatish (Windows 8.1) ===
 where python >nul 2>nul
 if errorlevel 1 (
@@ -19,5 +19,5 @@ if not exist .venv ( python -m venv .venv )
 .venv\Scripts\python -m pip install -r requirements-win81.txt
 if errorlevel 1 ( echo [XATO] Kutubxonalarni o'rnatib bo'lmadi. Internetni tekshiring. & pause & exit /b 1 )
 echo.
-echo Tayyor. Endi run_win81.bat ni ikki marta bosing.
+echo Tayyor. Endi scriptsun_win81.bat ni ikki marta bosing.
 pause

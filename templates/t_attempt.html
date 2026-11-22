@@ -1,33 +1,94 @@
 {% extends "base_t.html" %}
 {% block body %}
 <main>
+<p><a class="btn sec sm" href="/t">← Natijalar</a></p>
 <div class="card" style="margin-bottom:18px">
-<h2>{{ att.name }} <span class="mut">({{ att.login }})</span></h2>
-<p class="mut">Boshladi: {{ att.started_at|dt }} · Yubordi: {{ att.submitted_at|dt }}</p>
+<h2>{{ att.name }} <span class="mut">({{ att.login }}{% if att.grp %} · {{ att.grp }}{% endif %})</span></h2>
+<p class="mut">{{ att.try_no or 1 }}-urinish · Boshladi: {{ att.started_at|dt }} ·
+{% if att.submitted_at is none %}<b>Yozmoqda, {{ left }} daqiqa qoldi</b>{% else %}Yubordi: {{ att.submitted_at|dt }}{% endif %}</p>
+{% if att.carry %}<p><span class="tag y">Qayta topshirish chegirmasi: −{{ att.carry|num }} ball</span></p>{% endif %}
 {% if att.disq %}<p><span class="tag r">⛔ Chetlatilgan: {{ strikes }} marta oynadan chiqqan. Baholansa ball 0 bo'ladi.</span></p>
-{% elif strikes %}<p><span class="tag y">Jarima: {{ strikes }} marta chiqqan, avtomatik -{{ deduct|round(0)|int }} ball ayriladi</span></p>{% endif %}
+{% elif strikes %}<p><span class="tag y">Jarima: {{ strikes }} marta chiqqan, avtomatik −{{ deduct|round(0)|int }} ball ayriladi</span></p>{% endif %}
 {% if viol %}
-<details open><summary class="tag r" style="cursor:pointer">Jurnal: {{ viol|length }} hodisa</summary>
-<table>{% for v in viol %}<tr><td>{{ v.ts|dt }}</td><td>{{ v.kind }}</td><td>{{ '⚠ jarima' if v.penalty else '' }}</td></tr>{% endfor %}</table></details>
+<details><summary class="tag r" style="cursor:pointer">Jurnal: {{ viol|length }} hodisa</summary>
+<table>{% for v in viol %}<tr><td>{{ v.ts|dt }}</td><td>{{ v.kind }}</td><td>{{ '⚠ jarima' if v.penalty == 1 else 'kechirildi' if v.penalty == 2 else '' }}</td></tr>{% endfor %}</table></details>
 {% else %}<span class="tag g">Buzilish yo'q</span>{% endif %}
 </div>
+
+{% if not att.graded %}
+<div class="card" style="margin-bottom:18px">
+<h3>{% if att.submitted_at is none %}Vaqt qo'shish{% elif att.disq %}Chetlatishni bekor qilib davom ettirish{% else %}Ishni qayta ochish{% endif %}</h3>
+<form method="post" action="/t/attempt/{{ att.id }}/extend" class="row tight"
+  {% if att.submitted_at is not none %}onsubmit="return confirm('Ish qayta ochilsinmi? Talaba shu ishni davom ettiradi.')"{% endif %}>
+<div><label>Qo'shiladigan daqiqa</label><input type="number" name="minutes" value="10" min="1" max="600"></div>
+<div style="align-self:end"><button class="ok">{% if att.submitted_at is none %}Vaqt qo'shish{% else %}Qayta ochish{% endif %}</button></div>
+</form>
+<p class="mut">{% if att.disq %}Adashib chetlatilgan bo'lsa: ish shu javoblar bilan davom etadi, oxirgi jarima kechiriladi (jami {{ strikes - 1 }} ogohlantirish qoladi, keyingi chiqishda yana chetlatiladi).
+{% elif att.submitted_at is none %}Talabaning taymeri 10 soniya ichida o'zi yangilanadi.
+{% else %}Talaba "Ishga qaytish" orqali shu javoblarni davom ettiradi.{% endif %}</p>
+</div>
+{% endif %}
+
+{% if att.submitted_at is not none %}
 <form method="post" action="/t/attempt/{{ att.id }}/grade">
 {% for it in items %}
 <div class="card" style="margin-bottom:18px">
 <div class="mut">Savol {{ it.pos }}</div>
 <div class="q">{{ it.text }}</div>
 <div class="ans">{{ it.answer or '(javob yo\'q)' }}</div>
+<div class="qs" data-for="score_{{ it.id }}">{% for v in [0, mx/4, mx/2, mx*3/4, mx] %}<button type="button" data-v="{{ v|num }}">{{ v|num }}</button>{% endfor %}</div>
 <div class="row" style="margin-top:8px;grid-template-columns:110px 1fr">
-<div><label>Ball (0–{{ mx }})</label><input type="number" step="0.5" min="0" max="{{ mx }}" name="score_{{ it.id }}" value="{{ it.score if it.score is not none else '' }}" required></div>
+<div><label>Ball (0–{{ mx }})</label><input class="sc" type="number" step="0.5" min="0" max="{{ mx }}" name="score_{{ it.id }}" value="{{ it.score if it.score is not none else '' }}" required></div>
 <div><label>Izoh talabaga</label><input name="comment_{{ it.id }}" value="{{ it.comment or '' }}"></div>
 </div></div>
 {% endfor %}
 <div class="card" style="margin-bottom:18px"><label>Umumiy izoh</label><textarea name="comment" style="min-height:80px">{{ att.comment or '' }}</textarea>
-<p><button class="ok">Baholash va saqlash</button> <a class="btn sec" href="/t">Orqaga</a></p></div>
+<p class="mut">Yakuniy ball = savollar yig'indisi{% if deduct %} − jarima {{ deduct|num }}{% endif %}{% if att.carry %} − chegirma {{ att.carry|num }}{% endif %}{% if att.disq %} (chetlatilgan: 0){% endif %}.</p></div>
+<div class="gbar">
+<div><span class="mut">Jami:</span> <span class="tot" id="tot">–</span> <span class="mut">/ {{ mx * items|length }}</span>
+<span class="mut" style="margin-left:10px">Tekshirilmagan: {{ todo }}</span></div>
+<div class="acts"><a class="btn sec" href="/t">Orqaga</a>
+<button class="sec" name="go" value="1">Saqlash</button>
+<button class="ok" name="next" value="1">Saqlash va keyingisi →</button></div>
+</div>
 </form>
-<form method="post" action="/t/attempt/{{ att.id }}/reset" onsubmit="return confirm('Urinish o\'chiriladi va talaba qaytadan topshiradi. Davom etasizmi?')">
-<button class="bad">Qayta topshirishga ruxsat (urinishni o'chirish)</button></form>
+<script>
+(function(){const D={{ deduct|float }},C={{ carry|float }},DQ={{ 'true' if att.disq else 'false' }};
+const ins=[...document.querySelectorAll('input.sc')];
+function sync(){let t=0,all=true;ins.forEach(i=>{const v=parseFloat(String(i.value).replace(',','.'));if(isNaN(v))all=false;else t+=v;
+  const q=document.querySelector('.qs[data-for="'+i.name+'"]');q&&q.querySelectorAll('button').forEach(b=>b.classList.toggle('on',i.value!==''&&parseFloat(b.dataset.v)===v));});
+  const f=DQ?0:Math.max(0,t-D-C);document.getElementById('tot').textContent=(Math.round(f*10)/10)+(all?'':' …');}
+document.querySelectorAll('.qs button').forEach(b=>b.onclick=()=>{const i=document.querySelector('input[name="'+b.parentNode.dataset.for+'"]');i.value=b.dataset.v;sync();});
+ins.forEach(i=>i.addEventListener('input',sync));sync();})();
+</script>
+{% else %}
+<div class="card" style="margin-bottom:18px"><h3>Hozirgi javoblar</h3>
+{% for it in items %}<div class="mut">Savol {{ it.pos }}</div><div class="q">{{ it.text }}</div><div class="ans" style="margin-bottom:12px">{{ it.answer or '(hali yozmagan)' }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:18px">
+<h3>Qayta topshirishga ruxsat</h3>
+<form method="post" action="/t/attempt/{{ att.id }}/retake" onsubmit="return confirm('Bu urinish tarixga ko\'chiriladi va talaba qaytadan topshiradi. Davom etasizmi?')">
+<div class="row tight">
+<div><label>Chegirma (ball)</label><input name="carry" value="{{ suggest|num }}" inputmode="decimal"></div>
+</div>
+<label class="chk"><input type="checkbox" name="new_q" value="1" checked> Yangi savollar berilsin (ilgari ko'rmaganlari)</label>
+<button class="bad">Qayta topshirishga ruxsat</button>
+</form>
+<p class="mut">Taklif: {{ strikes }} ogohlantirish × jarima{% if att.carry %} + avvalgi chegirma {{ att.carry|num }}{% endif %} = {{ suggest|num }}. Chegirma yangi natijadan ayriladi; 0 yozsangiz chegirmasiz bo'ladi.</p>
+</div>
+
+{% if hist %}
+<div class="card" style="margin-bottom:18px">
+<h3>Oldingi urinishlar</h3>
+{% for h in hist %}{% set d = h.d %}
+<details class="hist"><summary style="cursor:pointer"><b>{{ d.try_no or loop.index }}-urinish</b> · {{ d.started_at|dt }} ·
+{% if d.disq %}chetlatilgan{% elif d.graded %}ball {{ d.total|num }}{% else %}baholanmagan{% endif %} · ogohl. {{ d.strikes }} · keyingisiga −{{ h.carry|num }}</summary>
+{% for it in d['items'] %}<div class="mut" style="margin-top:8px">Savol {{ it.pos }}{% if it.score is not none %} · {{ it.score|num }} ball{% endif %}</div><div class="q">{{ it.text }}</div><div class="ans">{{ it.answer or '(javob yo\'q)' }}</div>{% endfor %}
+</details>
+{% endfor %}
+</div>
+{% endif %}
 </main>
 {% endblock %}
-
-

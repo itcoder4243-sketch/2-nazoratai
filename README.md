@@ -1,61 +1,78 @@
-# NazoratAI: onlayn nazorat ishi tizimi
+# NazoratAI — onlayn nazorat ishi tizimi
 
-Ustoz savollar bazasini yuklaydi, har bir o'quvchiga bazadan oldindan **5 ta savol** biriktiriladi, o'quvchi **60 daqiqa** ichida **ochiq javob** yozadi, ustoz esa har savolga ball va izoh qo'yadi. O'quvchi o'z bahosi va izohini ko'radi.
+Ustoz savollar bazasini yuritadi. Har bir o'quvchiga bazadan alohida **5 ta savol** biriktiriladi. O'quvchi **60 daqiqa** ichida ochiq javob yozadi, ustoz har savolga ball va izoh qo'yadi (jami 100 ball). Telefon va kompyuterda ishlaydi.
 
-> **Muallif:** Nurbek Soliyev, AI va Full Stack dasturchi · [soliyevnurbek.uz](https://soliyevnurbek.uz) · [GitHub](https://github.com/SoliyevNurbek)
+> **Muallif:** SoliyevNurbek (Nurbek Soliyev) · [GitHub](https://github.com/SoliyevNurbek) · © 2026, barcha huquqlar himoyalangan ([LICENSE](LICENSE))
 
 ## Imkoniyatlar
 
-- **Savollar:** bazadan tasodifiy, har o'quvchiga alohida to'plam; guruh ichida takrorlanish minimal.
-- **Vaqt:** 60 daqiqalik taymer serverda hisoblanadi (brauzerda o'zgartirib bo'lmaydi). Vaqt tugasa ish avtomatik yuboriladi, javoblar har 10 soniyada saqlanadi.
-- **Nazorat:** nusxa olish/qo'yish, o'ng tugma, belgilash va PrintScreen bloklanadi; ekranda o'quvchi ismi bilan suv belgisi; boshqa oynaga o'tish aniqlanadi.
-  Oynadan chiqish: 1- va 2-marta jarima (sukut -10 ball), 3-martada nazoratdan chetlashtiriladi.
-- **Ustoz paneli** (alohida, qorong'i dizayn): natijalar, savollar bazasi, o'quvchilar ro'yxati, har savolga ball va izoh, Excel (CSV) eksport, qayta topshirishga ruxsat.
-- **O'quvchi oynasi:** oddiy o'quv uslubida; natijada ball, baho (2–5) va ustoz izohi.
-- **Yengil:** FastAPI + SQLite + oddiy HTML/JS. 200 o'quvchi bir vaqtda sinovdan o'tgan (kirish ~0,3 s, saqlash ~0,09 s) kuchsiz kompyuterda ham (2 yadroli Pentium, HDD).
+**O'quvchi**
+- Taymer serverda hisoblanadi; vaqt tugasa ish avtomatik yuboriladi.
+- Javoblar avtomatik saqlanadi (faqat o'zgargan javoblar yuboriladi).
+- Natija: ball, baho va ustoz izohi.
 
-## Texnologiyalar
+**Ko'chirishga qarshi nazorat**
+- Nusxa olish, qo'yish, o'ng tugma va belgilash bloklanadi.
+- Ekranda ism bilan suv belgisi chiqadi.
+- Oynadan chiqish: 1- va 2-marta −10 ball, 3-martada o'quvchi chetlashtiriladi.
 
-Python 3.8–3.12 · FastAPI · SQLite (WAL) · Jinja2 · Uvicorn
+**Ustoz paneli**
+- Natijalar: filtrlar, avtomatik yangilanish, qolgan vaqt, kengaytirilgan CSV.
+- O'quvchilar: qo'shish, tahrirlash, ommaviy yuklash, parolni tiklash, guruhlar, CSV.
+- Savollar: qo'shish, tahrirlash, qidirish, takrorlarni aniqlash, xavfsiz o'chirish.
+- Qayta topshirish: chegirma ball bilan, yangi yoki o'sha savollar bilan; chetlashtirilganlarga ommaviy ruxsat.
+- Vaqt qo'shish va ishni qayta ochish; har bir urinish tarixi saqlanadi.
 
-## O'rnatish va ishga tushirish
+**Tezlik**
+- 4 ta uvicorn worker, SQLite WAL va ulanishlar puli.
+- Fon checkpoint, indekslar, GZip va statik kesh.
+- 500 ta o'quvchi bir vaqtda lokal sinovdan xatosiz o'tgan.
+
+## Loyiha tuzilishi
+
+```
+app.py              # butun ilova (FastAPI)
+templates/, static/ # sahifalar va uslublar
+scripts/            # ishga tushirish, import, demo ma'lumot
+tests/              # avtomatik sinovlar (vaqtinchalik bazada)
+deploy/             # systemd, nginx va serverga o'rnatish qo'llanmasi
+docs/               # qo'shimcha hujjatlar
+data/               # baza (git'ga KIRMAYDI)
+```
+
+## Lokal ishga tushirish
 
 ```bash
 git clone https://github.com/SoliyevNurbek/nazoratai.git
 cd nazoratai
 python -m venv .venv
-.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
+.venv\Scripts\activate            # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env          # Linux/macOS: cp .env.example .env  va qiymatlarni to'ldiring
-python -m uvicorn app:app --host 0.0.0.0 --port 8000
+copy .env.example .env            # Linux/macOS: cp .env.example .env
+python -m uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
-Brauzerda `http://localhost:8000` oching. Ustoz: login `ustoz`, paroli `.env` dagi `TEACHER_PASSWORD`
-(bo'sh qoldirsangiz, birinchi ishga tushganda terminalda tasodifiy parol chiqadi).
+Brauzerda `http://localhost:8000` ni oching. Ustoz logini `ustoz`, paroli esa `.env` dagi `TEACHER_PASSWORD`. Agar u bo'sh bo'lsa, tasodifiy parol terminalga chiqariladi.
 
-**Windows 7/8.1:** `WINDOWS81_OQING.txt`, `setup_win81.bat`, `run_win81.bat` (eski kutubxonalar to'plami `requirements-win81.txt`).
+Tayyor skriptlar: `scripts/run_windows.bat`, `scripts/run_linux.sh`.
 
-## Haqiqiy ma'lumotlarni kiritish
+## Serverga o'rnatish (domen + HTTPS)
 
-1. Ustoz paneli → **Savollar**: har qatorga bitta savol; **Talabalar**: `Ism; login; parol` yoki faqat ism (login/parol avtomatik).
-2. Katta ro'yxat (Excel/Word) uchun: `tools/import_data.py`. `.env` dagi `PASSWORD_SALT` ni to'ldiring.
+To'liq qo'llanma: [deploy/README.md](deploy/README.md).
 
-## Xavfsizlik va maxfiylik
-
-- Parollar, tokenlar va baza (o'quvchilar, javoblar) repoga **kiritilmaydi**: `.env`, `data/`, `*.db`, `*.xlsx`, `*.docx`, `*.csv` `.gitignore` da.
-- Internetga chiqarishda (tunnel/hosting) ustoz parolini kuchli qiling va HTTPS ishlating.
-- `seed_demo.py` va `smoke_test.py` dagi `ustoz123`, `ali123` kabi qiymatlar **faqat sinov uchun** to'qima ma'lumot.
-- Brauzerda ekran suratini to'liq to'sib bo'lmaydi (masalan, boshqa telefon kamerasi bilan): shuning uchun suv belgisi va hodisalar jurnali ishlatiladi.
-
-## Testlar
+## Sinovlar
 
 ```bash
-python smoke_test.py            # asosiy oqim, takrorlanmaslik, jarima va chetlatish
-python tools/loadtest.py http://127.0.0.1:8000 <state.json> 200 90 <ustoz_paroli>   # yuklama sinovi
+pip install -r requirements-dev.txt
+python tests/smoke_test.py
+python tests/test_teacher_features.py
+python tests/test_ui_flow.py
 ```
 
-## Litsenziya
+Sinovlar vaqtinchalik bazada, to'qima ma'lumotlar bilan ishlaydi, real bazaga tegmaydi.
 
-Litsenziya hali tanlanmagan. Foydalanish yoki tarqatishdan oldin muallif bilan kelishing.
+## Xavfsizlik
 
-© 2026 Nurbek Soliyev
+- Real baza, o'quvchilar ro'yxati, parollar, savollar fayllari va `.env` git'ga yuklanmaydi (`.gitignore`).
+- Parollar bazada xeshlangan holda saqlanadi.
+- HTTPS orqali ishlatganda `.env` da `COOKIE_SECURE=1` qiling.
