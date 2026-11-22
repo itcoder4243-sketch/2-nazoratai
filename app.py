@@ -92,7 +92,9 @@ CREATE TABLE IF NOT EXISTS violations(id INTEGER PRIMARY KEY, attempt_id INTEGER
 """
 DEFAULTS = {"duration_min": "60", "q_count": "5", "max_per_q": "20", "penalty_points": "10", "max_strikes": "3",
             # natijalar ustoz e'lon qilgandan keyin ko'rinadi; imtihon oynasi: 0 = cheklovsiz (unix vaqt)
-            "results_published": "0", "open_at": "0", "close_at": "0"}
+            "results_published": "0", "open_at": "0", "close_at": "0",
+            # ustoz imtihonni to'xtatgan vaqt (0 = to'xtatilmagan)
+            "stopped_at": "0"}
 # oynadan chiqish/skrinshot urinishlari jarima oladi; nusxa olish urinishlari faqat jurnalga yoziladi
 PENALTY_KINDS = {"tab_hidden", "window_blur", "exit_fullscreen", "printscreen", "screenshot_key", "print"}
 STRIKE_GAP = 5  # soniya: bitta chiqish bir necha hodisa bersa, bitta jarima
@@ -140,6 +142,9 @@ def init_db():
                 "ALTER TABLE attempts ADD COLUMN carry REAL DEFAULT 0",
                 "ALTER TABLE attempts ADD COLUMN try_no INTEGER DEFAULT 1",
                 "CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, ts INTEGER, carry REAL, data TEXT)",
+                # imtihon to'xtatilganda yozilayotgan ish qabul qilinmaydi; ustoz qayta ruxsat bersa, talaba yopiq vaqtda ham boshlaydi
+                "ALTER TABLE attempts ADD COLUMN rejected INTEGER DEFAULT 0",
+                "ALTER TABLE users ADD COLUMN reopen INTEGER DEFAULT 0",
                 # indekslar: har saqlash/panel so`rovi butun jadvalni ko`rib chiqmasligi uchun
                 "CREATE INDEX IF NOT EXISTS ix_aq_attempt ON attempt_q(attempt_id)",
                 "CREATE INDEX IF NOT EXISTS ix_aq_question ON attempt_q(question_id)",
@@ -266,7 +271,7 @@ def nav_todo():
     except queue.Empty:
         conn = connect()
     try:
-        return conn.execute("SELECT COUNT(*) FROM attempts WHERE graded=0 AND "
+        return conn.execute("SELECT COUNT(*) FROM attempts WHERE graded=0 AND rejected=0 AND "
                             "(submitted_at IS NOT NULL OR deadline < ?)", (int(time.time()),)).fetchone()[0]
     finally:
         if _pool.qsize() < 64:
@@ -396,11 +401,11 @@ def logout(request: Request, conn=Depends(get_db)):
 
 # ---------------- talaba ----------------
 def exam_window(conn, now=None):
-    """Imtihon oynasi holati: ('before'|'open'|'closed', open_at, close_at). 0 = chegara yo'q."""
+    """Imtihon oynasi holati: ('stopped'|'before'|'open'|'closed', open_at, close_at, stopped_at). 0 = chegara yo'q."""
     now = now or time.time()
-    o, c = setting(conn, "open_at"), setting(conn, "close_at")
-    st = "before" if o and now < o else "closed" if c and now >= c else "open"
-    return {"state": st, "open_at": o, "close_at": c}
+    o, c, s = setting(conn, "open_at"), setting(conn, "close_at"), setting(conn, "stopped_at")
+    st = "stopped" if s else "before" if o and now < o else "closed" if c and now >= c else "open"
+    return {"state": st, "open_at": o, "close_at": c, "stopped_at": s}
 
 
 def finalize_if_expired(conn, att):
@@ -431,7 +436,8 @@ def student_home(request: Request, u=Depends(require("student")), conn=Depends(g
 @app.post("/s/start")
 def student_start(u=Depends(require("student")), conn=Depends(get_db)):
     win = exam_window(conn)
-    if win["state"] != "open" and not conn.execute("SELECT 1 FROM attempts WHERE user_id=?", (u["id"],)).fetchone():
+    if win["state"] != "open" and not u["reopen"] and \
+            not conn.execute("SELECT 1 FROM attempts WHERE user_id=?", (u["id"],)).fetchone():
         return RedirectResponse("/s", status_code=303)
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -447,11 +453,12 @@ def student_start(u=Depends(require("student")), conn=Depends(get_db)):
                 return RedirectResponse("/s", status_code=303)
             now = int(time.time())
             deadline = now + setting(conn, "duration_min") * 60
-            if win["close_at"]:  # yopilish vaqtidan oshmaydi
+            if win["close_at"] > now:  # yopilish vaqtidan oshmaydi (ustoz yopilgandan keyin ruxsat bergan bo'lsa, to'liq vaqt)
                 deadline = min(deadline, win["close_at"])
             cur = conn.execute(
                 "INSERT INTO attempts(user_id,started_at,deadline,carry,try_no) VALUES(?,?,?,?,?)",
                 (u["id"], now, deadline, u["carry"] or 0, (u["retakes"] or 0) + 1))
+            conn.execute("UPDATE users SET reopen=0 WHERE id=?", (u["id"],))
             aid = cur.lastrowid
             for i, qid in enumerate(ids, 1):
                 conn.execute("INSERT INTO attempt_q(attempt_id,question_id,pos) VALUES(?,?,?)", (aid, qid, i))
@@ -494,7 +501,8 @@ def api_save(data: dict = Body(...), u=Depends(require("student")), conn=Depends
         # taymer tugadi deb kelgan avtomatik yuborish: ustoz vaqt qo`shgan bo`lsa yubormaymiz
         final = bool(data.get("final")) and not (data.get("auto") and att["deadline"] > time.time() + 3)
         if final:
-            conn.execute("UPDATE attempts SET submitted_at=? WHERE id=?", (int(time.time()), att["id"]))
+            # ustoz shu orada imtihonni to'xtatgan bo'lsa, ish qabul qilinmagan holicha qoladi
+            conn.execute("UPDATE attempts SET submitted_at=? WHERE id=? AND submitted_at IS NULL", (int(time.time()), att["id"]))
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -521,7 +529,7 @@ def api_violation(data: dict = Body(...), u=Depends(require("student")), conn=De
     ms, pp = setting(conn, "max_strikes"), setting(conn, "penalty_points")
     disq = bool(pen and strikes >= ms)
     if disq:
-        conn.execute("UPDATE attempts SET submitted_at=?, disq=1 WHERE id=?", (now, att["id"]))
+        conn.execute("UPDATE attempts SET submitted_at=?, disq=1 WHERE id=? AND submitted_at IS NULL", (now, att["id"]))
     return JSONResponse({"strike": bool(pen), "strikes": strikes, "max": ms, "penalty": pp,
                          "disq": disq, "submitted": disq})
 
@@ -533,10 +541,12 @@ def strike_count(conn, aid):
 # ---------------- ustoz ----------------
 def state_of(r):
     return ("Kirmagan" if not r["aid"] else "Yozmoqda" if r["submitted_at"] is None
-            else "Baholangan" if r["graded"] else "Chetlatilgan" if r["disq"] else "Tekshirilmagan")
+            else "Qabul qilinmagan" if r["rejected"] else "Baholangan" if r["graded"]
+            else "Chetlatilgan" if r["disq"] else "Tekshirilmagan")
 
 
-STATES = ("Kirmagan", "Yozmoqda", "Tekshirilmagan", "Chetlatilgan", "Baholangan")
+STATES = ("Kirmagan", "Yozmoqda", "Tekshirilmagan", "Chetlatilgan", "Baholangan", "Qabul qilinmagan")
+SUBMITTED = ("Tekshirilmagan", "Chetlatilgan", "Baholangan")  # qabul qilingan ishlar
 
 
 def load_cfg(conn):
@@ -549,7 +559,7 @@ def results_data(conn):
     """Har bir talabaning joriy holati (vaqti o'tgan ishlar yopiladi), holatlar soni va umumiy statistika."""
     rows = conn.execute(
         "SELECT u.id uid, u.name, u.login, u.grp, u.carry ucarry, a.id aid, a.started_at, a.deadline, a.submitted_at, "
-        "a.total, a.graded, a.graded_at, a.disq, a.carry, a.try_no, "
+        "a.total, a.graded, a.graded_at, a.disq, a.carry, a.try_no, a.rejected, "
         "(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.penalty=1) viol "
         "FROM users u LEFT JOIN attempts a ON a.user_id=u.id WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
     rows = [dict(r) for r in rows]
@@ -566,7 +576,7 @@ def results_data(conn):
         "students": len(rows),
         "questions": conn.execute("SELECT COUNT(*) c FROM questions").fetchone()["c"],
         "pending": cnt["Tekshirilmagan"] + cnt["Chetlatilgan"],
-        "graded": cnt["Baholangan"], "cnt": cnt,
+        "graded": cnt["Baholangan"], "cnt": cnt, "rejected": cnt["Qabul qilinmagan"],
         "submitted": cnt["Tekshirilmagan"] + cnt["Chetlatilgan"] + cnt["Baholangan"],
         "avg": sum(graded) / len(graded) if graded else None,
     }
@@ -605,7 +615,7 @@ def teacher_dashboard(request: Request, u=Depends(require("teacher")), conn=Depe
     for g in sorted({r["grp"] or "—" for r in rows}, key=lambda g: [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", g)]):
         gr = [r for r in rows if (r["grp"] or "—") == g]
         gg = [r["total"] for r in gr if r["graded"]]
-        groups.append({"grp": g, "n": len(gr), "sub": sum(1 for r in gr if r["state"] in STATES[2:]),
+        groups.append({"grp": g, "n": len(gr), "sub": sum(1 for r in gr if r["state"] in SUBMITTED),
                        "graded": len(gg), "avg": sum(gg) / len(gg) if gg else None, "max": max(gg) if gg else None})
     return render(request, "t_dash.html", user=u, stats=stats, cfg=cfg, mx_total=mx, top=top, low=low,
                   hist=hist, hmax=hmax, grades=grades, summary=summary, groups=groups,
@@ -616,10 +626,12 @@ def teacher_dashboard(request: Request, u=Depends(require("teacher")), conn=Depe
 def teacher_results(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
     rows, stats = results_data(conn)
     cfg = load_cfg(conn)
-    disq_n = conn.execute("SELECT COUNT(*) c FROM attempts WHERE disq=1").fetchone()["c"]
+    disq_n = conn.execute("SELECT COUNT(*) c FROM attempts WHERE disq=1 AND rejected=0").fetchone()["c"]
     groups = sorted({r["grp"] for r in rows if r["grp"]})
+    rejected = [r for r in rows if r["state"] == "Qabul qilinmagan"]
     return render(request, "t_results.html", user=u, rows=rows, stats=stats, cfg=cfg, groups=groups,
-                  mx_total=cfg["max_per_q"] * cfg["q_count"], disq_n=disq_n)
+                  mx_total=cfg["max_per_q"] * cfg["q_count"], disq_n=disq_n, rejected=rejected,
+                  states=STATES, win=exam_window(conn))
 
 
 @app.get("/t/review")
@@ -646,8 +658,11 @@ def recent_events(conn, limit=12):
         ev.append((r["ts"], "ban" if r["n"] >= ms else "warn", r["aid"],
                    f"{r['name']} " + (f"chetlatildi ({r['n']}/{ms})" if r["n"] >= ms else f"oynadan chiqdi ({r['n']}/{ms})")))
     for r in conn.execute("SELECT a.id aid, a.submitted_at ts, u.name FROM attempts a JOIN users u ON u.id=a.user_id "
-                          "WHERE a.submitted_at IS NOT NULL AND a.disq=0 ORDER BY a.submitted_at DESC LIMIT ?", (limit,)):
+                          "WHERE a.submitted_at IS NOT NULL AND a.disq=0 AND a.rejected=0 ORDER BY a.submitted_at DESC LIMIT ?", (limit,)):
         ev.append((r["ts"], "sent", r["aid"], f"{r['name']} ishni yubordi"))
+    for r in conn.execute("SELECT a.id aid, a.submitted_at ts, u.name FROM attempts a JOIN users u ON u.id=a.user_id "
+                          "WHERE a.rejected=1 ORDER BY a.submitted_at DESC LIMIT ?", (limit,)):
+        ev.append((r["ts"] + 0.5, "ban", r["aid"], f"{r['name']}: ish qabul qilinmadi (imtihon to'xtatildi)"))
     for r in conn.execute("SELECT a.id aid, a.started_at ts, u.name FROM attempts a JOIN users u ON u.id=a.user_id "
                           "ORDER BY a.started_at DESC LIMIT ?", (limit,)):
         ev.append((r["ts"], "start", r["aid"], f"{r['name']} boshladi"))
@@ -659,7 +674,9 @@ def recent_events(conn, limit=12):
 def teacher_settings_page(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
     cfg = load_cfg(conn)
     return render(request, "t_settings.html", user=u, cfg=cfg, win=exam_window(conn), backups=list_backups(),
-                  now_dtl=fmt_ts(time.time(), "%Y-%m-%dT%H:%M"))
+                  now_dtl=fmt_ts(time.time(), "%Y-%m-%dT%H:%M"),
+                  writing_n=conn.execute("SELECT COUNT(*) c FROM attempts WHERE submitted_at IS NULL AND deadline>?",
+                                         (int(time.time()),)).fetchone()["c"])
 
 
 @app.post("/t/settings")
@@ -761,7 +778,7 @@ def create_student(conn, name, grp=None, login=None, pw=None):
 @app.get("/t/students")
 def teacher_students(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
     st = conn.execute(
-        "SELECT u.*, a.id aid, a.submitted_at, a.graded, a.disq FROM users u LEFT JOIN attempts a ON a.user_id=u.id "
+        "SELECT u.*, a.id aid, a.submitted_at, a.graded, a.disq, a.rejected FROM users u LEFT JOIN attempts a ON a.user_id=u.id "
         "WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
     st = [dict(s, state=state_of(s)) for s in st]
     groups = sorted({s["grp"] for s in st if s["grp"]})
@@ -876,8 +893,8 @@ def teacher_attempt(aid: int, request: Request, u=Depends(require("teacher")), c
     return render(request, "t_attempt.html", user=u, att=att, items=items, viol=viol, mx=setting(conn, "max_per_q"),
                   strikes=strikes, deduct=calc_deduct(conn, att, strikes), hist=hist,
                   suggest=default_carry(conn, att), left=max(0, int((att["deadline"] - time.time()) // 60)),
-                  todo=conn.execute("SELECT COUNT(*) c FROM attempts WHERE graded=0 AND submitted_at IS NOT NULL").fetchone()["c"],
-                  carry=att["carry"] or 0)
+                  todo=conn.execute("SELECT COUNT(*) c FROM attempts WHERE graded=0 AND rejected=0 AND submitted_at IS NOT NULL").fetchone()["c"],
+                  carry=att["carry"] or 0, dur=setting(conn, "duration_min"))
 
 
 def calc_deduct(conn, att, strikes):
@@ -897,6 +914,8 @@ async def teacher_grade(aid: int, request: Request, u=Depends(require("teacher")
     att = conn.execute("SELECT * FROM attempts WHERE id=?", (aid,)).fetchone()
     if not att:
         return back("/t/results", "Urinish topilmadi")
+    if att["rejected"]:
+        return back(f"/t/attempt/{aid}", "Bu ish qabul qilinmagan: baholab bo'lmaydi. Qayta topshirishga ruxsat bering yoki ishni qayta oching.")
     mx = setting(conn, "max_per_q")
     total = 0.0
     for r in conn.execute("SELECT id FROM attempt_q WHERE attempt_id=?", (aid,)).fetchall():
@@ -923,7 +942,7 @@ async def teacher_grade(aid: int, request: Request, u=Depends(require("teacher")
 def next_ungraded(conn, aid=None):
     """Tekshirilmagan (yuborilgan, baholanmagan) keyingi ish: guruh va ism tartibida, joriydan keyin."""
     rows = [r["id"] for r in conn.execute(
-        "SELECT a.id FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.graded=0 AND "
+        "SELECT a.id FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.graded=0 AND a.rejected=0 AND "
         "(a.submitted_at IS NOT NULL OR a.deadline < ?) ORDER BY u.grp, u.name", (int(time.time()),))]
     if aid in rows:
         i = rows.index(aid)
@@ -960,7 +979,8 @@ def do_retake(conn, aid, carry=None, new_q=True):
     conn.execute("DELETE FROM violations WHERE attempt_id=?", (aid,))
     conn.execute("DELETE FROM attempt_q WHERE attempt_id=?", (aid,))
     conn.execute("DELETE FROM attempts WHERE id=?", (aid,))
-    conn.execute("UPDATE users SET carry=?, retakes=COALESCE(retakes,0)+1 WHERE id=?", (carry, uid))
+    # ustoz ruxsati: imtihon to'xtatilgan yoki yopilgan bo'lsa ham shu talaba boshlay oladi
+    conn.execute("UPDATE users SET carry=?, retakes=COALESCE(retakes,0)+1, reopen=1 WHERE id=?", (carry, uid))
     return uid
 
 
@@ -994,22 +1014,63 @@ def teacher_reset(aid: int, u=Depends(require("teacher")), conn=Depends(get_db))
     return teacher_retake(aid, u, conn, carry="0", new_q="")
 
 
-@app.post("/t/retake-disq")
-def teacher_retake_disq(u=Depends(require("teacher")), conn=Depends(get_db),
-                        carry: str = Form(""), new_q: str = Form(""), grp: str = Form("")):
-    c = parse_carry(carry)
+def retake_many(conn, where, grp, carry, new_q):
     conn.execute("BEGIN IMMEDIATE")
     try:
         ids = [r["id"] for r in conn.execute(
-            "SELECT a.id FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.disq=1" + (" AND u.grp=?" if grp else ""),
+            "SELECT a.id FROM attempts a JOIN users u ON u.id=a.user_id WHERE " + where + (" AND u.grp=?" if grp else ""),
             (grp,) if grp else ())]
         for aid in ids:
-            do_retake(conn, aid, c, bool(new_q))
+            do_retake(conn, aid, carry, new_q)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
-    return back("/t/results", f"{len(ids)} ta chetlatilgan talabaga qayta topshirishga ruxsat berildi")
+    return len(ids)
+
+
+@app.post("/t/retake-disq")
+def teacher_retake_disq(u=Depends(require("teacher")), conn=Depends(get_db),
+                        carry: str = Form(""), new_q: str = Form(""), grp: str = Form("")):
+    n = retake_many(conn, "a.disq=1 AND a.rejected=0", grp, parse_carry(carry), bool(new_q))
+    return back("/t/results", f"{n} ta chetlatilgan talabaga qayta topshirishga ruxsat berildi")
+
+
+@app.post("/t/retake-rejected")
+def teacher_retake_rejected(u=Depends(require("teacher")), conn=Depends(get_db),
+                            carry: str = Form("0"), new_q: str = Form(""), grp: str = Form("")):
+    """Imtihon to'xtatilganda qabul qilinmagan ishlar: talabalar qaytadan topshiradi (sukut bo'yicha chegirmasiz)."""
+    n = retake_many(conn, "a.rejected=1", grp, parse_carry(carry) or 0.0, bool(new_q))
+    return back("/t/results#rejected", f"{n} ta talabaga nazorat ishi qayta berildi: ular «Boshlash» ni bosib qaytadan yozadi")
+
+
+@app.post("/t/stop")
+def teacher_stop(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+    """Imtihonni to'xtatish: shu paytgacha yuborilgan ishlar qabul qilinadi, hali yozayotganlarniki qabul qilinmaydi."""
+    now = int(time.time())
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # vaqti allaqachon tugagan ishlar o'z vaqtida yuborilgan hisoblanadi
+        conn.execute("UPDATE attempts SET submitted_at=deadline WHERE submitted_at IS NULL AND deadline<=?", (now,))
+        n = conn.execute("UPDATE attempts SET submitted_at=?, rejected=1 WHERE submitted_at IS NULL", (now,)).rowcount
+        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('stopped_at',?)", (str(now),))
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    _settings["t"] = 0
+    to = urlparse(request.headers.get("referer") or "").path
+    return back(to if to.startswith("/t") else "/t",
+                f"Imtihon to'xtatildi. {n} ta yozilayotgan ish qabul qilinmadi" if n else
+                "Imtihon to'xtatildi. Yozilayotgan ish yo'q edi")
+
+
+@app.post("/t/resume")
+def teacher_resume(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+    conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('stopped_at','0')")
+    _settings["t"] = 0
+    to = urlparse(request.headers.get("referer") or "").path
+    return back(to if to.startswith("/t") else "/t", "Imtihon qayta ochildi: kirmagan talabalar boshlay oladi")
 
 
 @app.post("/t/attempt/{aid}/extend")
@@ -1029,7 +1090,7 @@ def teacher_extend(aid: int, u=Depends(require("teacher")), conn=Depends(get_db)
         if extra > 0:
             conn.execute("UPDATE violations SET penalty=2 WHERE id IN (SELECT id FROM violations WHERE attempt_id=? "
                          "AND penalty=1 ORDER BY ts DESC LIMIT ?)", (aid, extra))
-    conn.execute("UPDATE attempts SET deadline=?, submitted_at=NULL, disq=0 WHERE id=?", (deadline, aid))
+    conn.execute("UPDATE attempts SET deadline=?, submitted_at=NULL, disq=0, rejected=0 WHERE id=?", (deadline, aid))
     msg = f"+{minutes} daqiqa qo'shildi" + (" va ish qayta ochildi" if att["submitted_at"] is not None else "")
     return back(f"/t/attempt/{aid}", msg)
 
@@ -1037,7 +1098,7 @@ def teacher_extend(aid: int, u=Depends(require("teacher")), conn=Depends(get_db)
 @app.get("/t/export.csv")
 def teacher_export(u=Depends(require("teacher")), conn=Depends(get_db)):
     rows = conn.execute(
-        "SELECT u.grp, u.name, u.login, a.submitted_at, a.total, a.comment, a.graded, a.disq, a.deduct, a.carry, a.try_no, "
+        "SELECT u.grp, u.name, u.login, a.submitted_at, a.total, a.comment, a.graded, a.disq, a.deduct, a.carry, a.try_no, a.rejected, "
         "(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.penalty=1) viol "
         "FROM users u LEFT JOIN attempts a ON a.user_id=u.id WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
     mx = setting(conn, "max_per_q") * setting(conn, "q_count")
@@ -1046,7 +1107,8 @@ def teacher_export(u=Depends(require("teacher")), conn=Depends(get_db)):
     w.writerow(["Guruh", "Ism", "Login", "Holat", "Urinish", "Ball", f"Maks({mx})", "Baho", "Ogohlantirish",
                 "Jarima", "Qayta topshirish chegirmasi", "Izoh"])
     for r in rows:
-        st = ("Kirmagan" if r["try_no"] is None else "Yozmoqda" if r["submitted_at"] is None else "Chetlatilgan" if r["disq"] else
+        st = ("Kirmagan" if r["try_no"] is None else "Yozmoqda" if r["submitted_at"] is None else
+              "Qabul qilinmagan" if r["rejected"] else "Chetlatilgan" if r["disq"] else
               "Baholangan" if r["graded"] else "Tekshirilmagan")
         w.writerow([r["grp"] or "", r["name"], r["login"], st, r["try_no"] or "",
                     ("%g" % r["total"]) if r["graded"] else "", mx,
@@ -1201,7 +1263,8 @@ def teacher_export_xlsx(u=Depends(require("teacher")), conn=Depends(get_db)):
     thin = Side(style="thin", color="C9D1DD")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
     gfill = {5: "D1FAE5", 4: "DBEAFE", 3: "FEF3C7", 2: "FEE2E2"}
-    sfill = {"Baholangan": "D1FAE5", "Tekshirilmagan": "FEF3C7", "Chetlatilgan": "FEE2E2", "Yozmoqda": "E0E7FF"}
+    sfill = {"Baholangan": "D1FAE5", "Tekshirilmagan": "FEF3C7", "Chetlatilgan": "FEE2E2", "Yozmoqda": "E0E7FF",
+             "Qabul qilinmagan": "FECACA"}
 
     def table(ws, top, headers, data, widths):
         ws.cell(row=1, column=1, value=title).font = Font(bold=True, size=14)
@@ -1261,7 +1324,7 @@ def teacher_export_xlsx(u=Depends(require("teacher")), conn=Depends(get_db)):
         gr = [r for r in rows if (r["grp"] or "—") == grp]
         tt = [r["total"] for r in gr if r["graded"]]
         gg = [grade_of(t, mx) for t in tt]
-        gdata.append([grp, len(gr), sum(1 for r in gr if r["state"] in STATES[2:]), len(tt),
+        gdata.append([grp, len(gr), sum(1 for r in gr if r["state"] in SUBMITTED), len(tt),
                       round(sum(tt) / len(tt), 1) if tt else None, max(tt) if tt else None, min(tt) if tt else None,
                       gg.count(5), gg.count(4), gg.count(3), gg.count(2),
                       round(sum(1 for g in gg if g >= 3) / len(gg) * 100) if gg else None])

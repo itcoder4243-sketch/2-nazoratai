@@ -2,8 +2,8 @@
 <html lang="uz"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ustoz paneli · Nazorat</title>
-<link rel="stylesheet" href="/static/style.css?v=7">
-<link rel="stylesheet" href="/static/teacher.css?v=11"></head>
+<link rel="stylesheet" href="/static/style.css?v=8">
+<link rel="stylesheet" href="/static/teacher.css?v=12"></head>
 <body class="t">
 <div class="shell">
 <aside class="side" id="side" aria-label="Asosiy menyu">
@@ -18,7 +18,8 @@
     <a href="/t/settings" class="{{ 'on' if p.startswith('/t/settings') }}">{{ ic('settings') }}<span>Sozlamalar</span></a>
   </nav>
   <div class="me"><div class="av">{{ user.name[:1] }}</div><div><b>{{ user.name }}</b><small>Administrator</small></div>
-    <a href="/logout" title="Chiqish">{{ ic('logout') }}</a></div>
+    <a href="/logout" title="Chiqish" data-c-title="Tizimdan chiqish" data-c-ok="Ustoz panelidan chiqasiz|Qayta kirish uchun login va parol kerak bo'ladi"
+      data-c-bad="Saqlanmagan baholar va o'zgarishlar yo'qoladi">{{ ic('logout') }}</a></div>
 </aside>
 <div class="scrim" id="scrim" hidden></div>
 <button type="button" class="navbtn" id="navbtn" aria-label="Menyuni ochish" aria-controls="side" aria-expanded="false">
@@ -45,6 +46,71 @@
   // chapdan o'ngga surib yopish
   let x0=null;side.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;},{passive:true});
   side.addEventListener('touchend',e=>{if(x0!==null&&x0-e.changedTouches[0].clientX>60)set(false);x0=null;},{passive:true});
+})();
+</script>
+<script>
+// har bir amal tugmasi oldidan tasdiqlash oynasi: qaysi tugma bosilyapti, nima o'zgaradi (yashil) va nimaga e'tibor berish kerak (qizil).
+// Matnlar forma yoki tugmadagi data-c-title / data-c-ok / data-c-bad ("|" bilan ajratilgan) atributlaridan olinadi.
+// {maydon} — formadagi qiymat, {@id} — sahifadagi element matni, {@lines} — matn maydonidagi qatorlar soni.
+(function(){
+  const d=document.createElement('div');d.className='cfm';d.hidden=true;
+  d.innerHTML='<div class="cfm-box" role="dialog" aria-modal="true" aria-labelledby="cfm-t">'+
+    '<div class="cfm-h"><span class="cfm-ico" aria-hidden="true">!</span><div><small>Tasdiqlang</small><b id="cfm-t"></b></div></div>'+
+    '<p class="cfm-btn"></p>'+
+    '<div class="cfm-ok"><h4>✓ Nima o\'zgaradi</h4><ul></ul></div>'+
+    '<div class="cfm-bad"><h4>⚠ Diqqat</h4><ul></ul></div>'+
+    '<div class="cfm-acts"><button type="button" class="sec" data-a="back">← Orqaga</button><button type="button" class="ok" data-a="go">Davom et</button></div></div>';
+  document.body.appendChild(d);
+  const $=s=>d.querySelector(s), go=$('[data-a=go]'), backB=$('[data-a=back]');
+  let act=null, prev=null;
+  function val(f,n){
+    if(n==='@lines'){const t=f&&f.querySelector('textarea');return t?String(t.value.split('\n').filter(s=>s.trim()).length):'0';}
+    if(n[0]==='@'){const e=document.getElementById(n.slice(1));return e?e.textContent.trim():'';}
+    const el=f&&f.elements[n];if(!el)return '';
+    if(el.type==='checkbox')return el.checked?'ha':'yo\'q';
+    if(el.tagName==='SELECT'){const o=el.options[el.selectedIndex];return o?o.text:'';}
+    if(el.type==='datetime-local')return el.value?el.value.replace('T',' '):'belgilanmagan';
+    return String(el.value||'').trim()||el.placeholder||'belgilanmagan';
+  }
+  function fill(ul,txt,f){
+    ul.innerHTML='';
+    (txt||'').split('|').map(s=>s.trim()).filter(Boolean).forEach(s=>{const li=document.createElement('li');li.textContent=s.replace(/\{(@?\w+)\}/g,(m,n)=>val(f,n));ul.appendChild(li);});
+    ul.parentNode.hidden=!ul.children.length;
+  }
+  function show(src,f,label,run){
+    const g=k=>(src&&src.dataset[k])||(f&&f.dataset[k])||'';
+    const own=src&&(src.dataset.cOk||src.dataset.cBad);  // tugmaning o'z matni bo'lsa, formanikidan ustun
+    const ok=own?src.dataset.cOk:g('cOk'), bad=own?src.dataset.cBad:g('cBad');
+    $('#cfm-t').textContent=g('cTitle')||label;
+    $('.cfm-btn').textContent='Siz «'+label+'» tugmasini bosyapsiz. Davom etishdan oldin o\'zgarishlarni tekshiring.';
+    fill($('.cfm-ok ul'),ok||'Kiritilgan o\'zgarishlar saqlanadi',f);
+    fill($('.cfm-bad ul'),bad,f);
+    const danger=!!g('cDanger');d.classList.toggle('danger',danger);go.className=danger?'bad':'ok';go.disabled=false;
+    act=run;prev=document.activeElement;d.hidden=false;document.body.classList.add('cfm-open');window.__cfm=true;
+    setTimeout(()=>go.focus(),0);
+  }
+  function hide(){d.hidden=true;document.body.classList.remove('cfm-open');window.__cfm=false;act=null;prev&&prev.focus&&prev.focus({preventScroll:true});}
+  go.onclick=()=>{const r=act;go.disabled=true;d.hidden=true;document.body.classList.remove('cfm-open');window.__cfm=false;act=null;r&&r();};
+  backB.onclick=hide;
+  d.addEventListener('click',e=>{if(e.target===d)hide();});
+  addEventListener('keydown',e=>{if(d.hidden)return;
+    if(e.key==='Escape'){e.preventDefault();hide();}
+    if(e.key==='Tab'){const a=[backB,go],i=a.indexOf(document.activeElement);e.preventDefault();a[(i+(e.shiftKey?a.length-1:1))%a.length].focus();}});
+  const text=el=>(el&&(el.getAttribute('title')&&!el.textContent.trim()?el.getAttribute('title'):el.textContent)||'').replace(/\s+/g,' ').trim();
+  document.addEventListener('submit',e=>{
+    const f=e.target;if(f.method!=='post'||f.dataset.cDone)return;
+    e.preventDefault();
+    const s=e.submitter||f.querySelector('button:not([type=button])');
+    show(s,f,text(s)||'Yuborish',()=>{
+      f.dataset.cDone='1';
+      if(f.requestSubmit){f.requestSubmit(e.submitter||undefined);}
+      else{if(s&&s.name){const h=document.createElement('input');h.type='hidden';h.name=s.name;h.value=s.value;f.appendChild(h);}f.submit();}
+    });
+  },true);
+  document.addEventListener('click',e=>{
+    const a=e.target.closest&&e.target.closest('a[data-c-title]');if(!a||e.ctrlKey||e.metaKey)return;
+    e.preventDefault();show(a,null,text(a)||a.dataset.cTitle,()=>{location.href=a.href;});
+  },true);
 })();
 </script>
 <script>

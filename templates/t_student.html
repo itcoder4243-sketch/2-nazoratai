@@ -12,7 +12,9 @@
 
 <div class="card" style="margin-bottom:18px">
 <h3>Ma'lumotlarni tahrirlash</h3>
-<form method="post" action="/t/students/{{ s.id }}/edit">
+<form method="post" action="/t/students/{{ s.id }}/edit" data-c-title="Talaba ma'lumotlarini saqlash"
+  data-c-ok="F.I.Sh.: {name}|Guruh: {grp}|Login: {login}"
+  data-c-bad="Login o'zgarsa, talaba yangi login bilan kiradi">
 <div class="row tight">
 <div style="grid-column:span 2"><label>F.I.Sh.</label><input name="name" value="{{ s.name }}" required></div>
 <div><label>Guruh</label><input name="grp" value="{{ s.grp or '' }}"></div>
@@ -23,9 +25,11 @@
 
 <div class="card" style="margin-bottom:18px">
 <h3>Parol</h3>
-<form method="post" action="/t/students/{{ s.id }}/password" onsubmit="return confirm('Parol almashtirilsinmi? Talaba tizimdan chiqariladi va yangi parol bilan kiradi.')">
+<form method="post" action="/t/students/{{ s.id }}/password" data-c-title="Talaba parolini yangilash"
+  data-c-ok="Yangi parol: {password}|Boshlagan ishi va vaqti saqlanib qoladi|Bloklangan bo'lsa, blok olib tashlanadi"
+  data-c-bad="Eski parol ishlamay qoladi|Talaba hozirgi qurilmadan chiqariladi va yangi parol bilan qayta kiradi">
 <div class="row tight">
-<div style="grid-column:span 2"><label>Yangi parol (bo'sh qoldirsangiz avtomatik yaratiladi)</label><input name="password" autocomplete="off"></div>
+<div style="grid-column:span 2"><label>Yangi parol (bo'sh qoldirsangiz avtomatik yaratiladi)</label><input name="password" autocomplete="off" placeholder="avtomatik yaratiladi"></div>
 <div style="align-self:end"><button class="sec">Parolni yangilash</button></div>
 </div></form>
 <p class="mut">Parol yangilansa talaba qurilmadan chiqariladi, boshlagan ishi va vaqti saqlanib qoladi. Ko'p marta noto'g'ri kiritib bloklangan bo'lsa, blok ham olib tashlanadi.</p>
@@ -50,7 +54,9 @@
 </div>
 {% endif %}
 
-<form method="post" action="/t/students/delete/{{ s.id }}" onsubmit="return confirm('{{ s.name|e }} o\'chirilsinmi? Natijalari ham o\'chadi.')">
+<form method="post" action="/t/students/delete/{{ s.id }}" data-c-title="Talabani o'chirish" data-c-danger="1"
+  data-c-ok="{{ s.name }} ro'yxatdan chiqadi"
+  data-c-bad="Talabaning ishi, javoblari, bahosi va tarixi BUTUNLAY o'chadi|Buni qaytarib bo'lmaydi (faqat zaxiradan)">
 <button class="bad">Talabani o'chirish</button></form>
 </main>
 {% endblock %}

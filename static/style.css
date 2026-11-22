@@ -109,3 +109,4 @@ header{flex-wrap:nowrap;gap:10px}
 header b{white-space:nowrap}
 header .mut{min-width:0;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 header a{flex:none}
+.ok-msg{color:var(--ok);font-weight:600}

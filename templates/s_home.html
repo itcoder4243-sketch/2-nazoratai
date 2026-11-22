@@ -11,7 +11,12 @@
 <li>Javoblar avtomatik saqlanadi. Vaqt tugaganda ish o'zi yuboriladi.</li>
 </ul>
 {% if user.carry %}<p class="err">Bu qayta topshirish: yakuniy natijangizdan <b>{{ user.carry|num }} ball</b> chegiriladi.</p>{% endif %}
-{% if win.state == 'before' %}
+{% if user.reopen %}
+<p class="ok-msg">Ustoz sizga nazorat ishini qayta berdi. «Boshlash» ni bosganingizdan keyin {{ minutes }} daqiqa vaqt sanaladi.</p>
+<form method="post" action="/s/start"><button class="ok">Boshlash</button></form>
+{% elif win.state == 'stopped' %}
+<p class="err"><b>Nazorat ishi ustoz tomonidan to'xtatilgan.</b> Ustoz qayta ochsa yoki sizga ruxsat bersa, shu yerda «Boshlash» tugmasi chiqadi.</p>
+{% elif win.state == 'before' %}
 <div class="wait" data-open="{{ win.open_at }}" data-now="{{ now }}">
   <div class="mut">Nazorat ishi boshlanadi:</div>
   <b class="when">{{ win.open_at|dtf }}</b>
@@ -33,6 +38,10 @@ tick();setInterval(tick,1000);})();
 </div>
 {% elif att.submitted_at is none %}
 <div class="card"><h2>Ish davom etmoqda</h2><a class="btn" href="/s/exam">Ishga qaytish</a></div>
+{% elif att.rejected %}
+<div class="card"><h2 class="err">✕ Ishingiz qabul qilinmadi</h2>
+<p>Siz yozayotgan paytda ustoz imtihonni to'xtatdi ({{ att.submitted_at|dtf }}), shuning uchun ish qabul qilinmadi.
+Ustoz qayta ruxsat bersa, shu sahifada «Boshlash» tugmasi chiqadi.</p></div>
 {% elif att.disq and not att.graded %}
 <div class="card"><h2 class="err">⛔ Siz nazoratdan chetlashtirildingiz</h2>
 <p>Imtihon vaqtida oynadan bir necha marta chiqqaningiz uchun ish to'xtatildi. Ustoz siz bilan bog'lanadi.</p></div>

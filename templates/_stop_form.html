@@ -1,0 +1,13 @@
+{# Imtihonni to'xtatish / qayta ochish tugmasi (Dashboard va Sozlamalar) #}
+{% set wn = stats.cnt['Yozmoqda'] if stats is defined else writing_n %}
+{% if win.state == 'stopped' %}
+<form method="post" action="/t/resume" data-c-title="Imtihonni qayta ochish"
+  data-c-ok="Hali kirmagan talabalar «Boshlash» ni bosib yoza oladi|Har biriga boshlagan paytidan {{ cfg.duration_min }} daqiqa beriladi"
+  data-c-bad="Qabul qilinmagan ishlar o'z-o'zidan qayta ochilmaydi: ularga Natijalar sahifasida alohida qayta bering">
+  <button class="ok sm">Imtihonni qayta ochish</button></form>
+{% else %}
+<form method="post" action="/t/stop" data-c-title="Imtihonni to'xtatish" data-c-danger="1"
+  data-c-ok="Shu paytgacha yuborilgan ishlar qabul qilinadi va tekshiriladi|Qabul qilinmaganlarga keyin nazorat ishini qayta berish mumkin|Imtihonni keyin qayta ochish mumkin"
+  data-c-bad="Hozir yozayotgan {{ wn }} ta talabaning ishi QABUL QILINMAYDI|Ular «Qabul qilinmaganlar» ro'yxatiga tushadi|Hali kirmaganlar imtihonni boshlay olmaydi">
+  <button class="bad sm">Imtihonni to'xtatish</button></form>
+{% endif %}

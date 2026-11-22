@@ -9,7 +9,9 @@
 <section class="card sec" id="exam">
 <div class="bar"><h2>Nazorat parametrlari</h2>
   <span class="mut">{{ cfg.duration_min }} daq · {{ cfg.q_count }} × {{ cfg.max_per_q }} = {{ cfg.q_count * cfg.max_per_q }} ball · −{{ cfg.penalty_points }} jarima</span></div>
-<form method="post" action="/t/settings" class="row">
+<form method="post" action="/t/settings" class="row" data-c-title="Nazorat parametrlarini saqlash"
+  data-c-ok="Nomi: {exam_title}|Vaqt: {duration_min} daqiqa, savollar: {q_count} × {max_per_q} ball|Jarima: −{penalty_points} ball, {max_strikes}-martada chetlatiladi"
+  data-c-bad="Vaqt va savollar soni faqat hali boshlamagan talabalarga ta'sir qiladi|Yozayotganlarning vaqti va savollari o'zgarmaydi">
 <div style="grid-column:1/-1"><label>Nazorat nomi (kirish sahifasida ko'rinadi)</label><input name="exam_title" value="{{ cfg.exam_title }}" placeholder="masalan: Pedagogika — nazorat ishi" maxlength="120"></div>
 <div><label>Vaqt (daqiqa)</label><input type="number" name="duration_min" value="{{ cfg.duration_min }}" min="1"></div>
 <div><label>Savollar soni</label><input type="number" name="q_count" value="{{ cfg.q_count }}" min="1"></div>
@@ -23,15 +25,23 @@
 
 <section class="card sec" id="window">
 <div class="bar"><h2>Imtihon vaqti</h2>
-  {% if win.state == 'before' %}<span class="tag y">Hali ochilmagan</span>{% elif win.state == 'closed' %}<span class="tag r">Yopilgan</span>{% else %}<span class="tag g">Ochiq</span>{% endif %}</div>
-<form method="post" action="/t/window" class="row">
-<div><label>Ochiladi (Toshkent vaqti)</label><input type="datetime-local" name="open_at" value="{{ win.open_at|dtl }}"></div>
-<div><label>Yopiladi (Toshkent vaqti)</label><input type="datetime-local" name="close_at" value="{{ win.close_at|dtl }}"></div>
+  {% if win.state == 'stopped' %}<span class="tag r">To'xtatilgan</span>{% elif win.state == 'before' %}<span class="tag y">Hali ochilmagan</span>{% elif win.state == 'closed' %}<span class="tag r">Yopilgan</span>{% else %}<span class="tag g">Ochiq</span>{% endif %}</div>
+<p>Sukut bo'yicha vaqt cheklovi yo'q: har bir talabaga «Boshlash» ni bosgan paytidan <b>{{ cfg.duration_min }} daqiqa</b> sanaladi.
+Xohlasangiz, imtihonning boshlanish va tugash vaqtini qo'shing.</p>
+<form method="post" action="/t/window" class="row" data-c-title="Imtihon vaqtini saqlash"
+  data-c-ok="Ochiladi: {open_at}|Yopiladi: {close_at}|Ochilishdan oldin talabalar qolgan vaqtni ko'radi"
+  data-c-bad="Yopilish vaqti kelganda yozayotganlarning ishi shu vaqtda avtomatik yuboriladi|Yopilgandan keyin yangi ish boshlab bo'lmaydi">
+<div><label>Boshlanish vaqti (Toshkent)</label><input type="datetime-local" name="open_at" value="{{ win.open_at|dtl }}"></div>
+<div><label>Tugash vaqti (Toshkent)</label><input type="datetime-local" name="close_at" value="{{ win.close_at|dtl }}"></div>
 <div style="align-self:end" class="acts"><button>Saqlash</button>
-  {% if win.open_at or win.close_at %}<button class="sec" name="clear" value="1" onclick="return confirm('Vaqt cheklovi olib tashlansinmi? Imtihon doim ochiq bo\'ladi.')">Cheklovni olib tashlash</button>{% endif %}</div>
+  {% if win.open_at or win.close_at %}<button class="sec" name="clear" value="1" data-c-title="Vaqt cheklovini olib tashlash"
+    data-c-ok="Imtihon doim ochiq bo'ladi|Har bir talabaga boshlagan paytidan {{ cfg.duration_min }} daqiqa sanaladi"
+    data-c-bad="Belgilangan boshlanish va tugash vaqti o'chadi">Cheklovni olib tashlash</button>{% endif %}</div>
 </form>
-<p class="mut">Bo'sh qoldirilsa, cheklov yo'q. Ochilishdan oldin talabalar kirib, qolgan vaqtni ko'radi va vaqt kelganda «Boshlash» tugmasi chiqadi.
-Yopilgandan keyin yangi ish boshlab bo'lmaydi, yozayotganlarning vaqti ham yopilish vaqtida tugaydi. Hozir: {{ now_dtl|replace('T', ' ') }}.</p>
+<p class="mut">Hozir: {{ now_dtl|replace('T', ' ') }}.</p>
+<div class="bar" style="margin-top:14px"><h3 style="margin:0">Imtihonni to'xtatish</h3>{% include "_stop_form.html" %}</div>
+<p class="mut">{% if win.state == 'stopped' %}Imtihon {{ win.stopped_at|dtf }} da to'xtatilgan. To'xtatilgan paytda yozayotganlarning ishi qabul qilinmadi: ular <a href="/t/results#rejected">Natijalar</a> sahifasidagi ro'yxatda.
+{% else %}Tugma bosilgan paytdan keyin ishlar qabul qilinmaydi: yozayotganlar «Qabul qilinmaganlar» ro'yxatiga tushadi va keyin ularga qayta berishingiz mumkin.{% endif %}</p>
 </section>
 
 <section class="card sec" id="publish">
@@ -39,16 +49,17 @@ Yopilgandan keyin yangi ish boshlab bo'lmaydi, yozayotganlarning vaqti ham yopil
   {% if cfg.results_published %}<span class="tag g">E'lon qilingan</span>{% else %}<span class="tag y">Yashirin</span>{% endif %}</div>
 {% if cfg.results_published %}
 <p>O'quvchilar baholangan ishlarida ball, baho va izohlarni ko'rmoqda.</p>
-<form method="post" action="/t/publish"><input type="hidden" name="on" value="0"><button class="sec">Natijalarni yashirish</button></form>
 {% else %}
 <p>O'quvchilar hozir faqat «Ish yuborildi» deb ko'radi. Barcha ishlarni tekshirib bo'lgach, natijalarni e'lon qiling.</p>
-<form method="post" action="/t/publish" onsubmit="return confirm('Natijalar barcha o\'quvchilarga ko\'rinadi. Davom etasizmi?')"><input type="hidden" name="on" value="1"><button class="ok">Natijalarni e'lon qilish</button></form>
 {% endif %}
+{% with long_label=1, btn_cls='' %}{% include "_publish_form.html" %}{% endwith %}
 </section>
 
 <section class="card sec" id="backup">
 <div class="bar"><h2>Zaxira nusxalar</h2>
-  <form method="post" action="/t/backup"><button class="sm">Hozir zaxira olish</button></form></div>
+  <form method="post" action="/t/backup" data-c-title="Hozir zaxira olish"
+    data-c-ok="Bazaning to'liq nusxasi serverda saqlanadi|Ro'yxatdan uni kompyuteringizga yuklab olasiz"
+    data-c-bad="Eng eski qo'lda olingan nusxa (10 tadan ortig'i) o'chiriladi"><button class="sm">Hozir zaxira olish</button></form></div>
 <p class="mut">Har kuni avtomatik bitta zaxira olinadi, oxirgi 14 kunniki saqlanadi. Imtihondan oldin va keyin qo'lda ham zaxira oling va kompyuteringizga yuklab qo'ying.</p>
 {% if backups %}<div class="tbl"><table>
 <tr><th>Fayl</th><th>Turi</th><th>Vaqt</th><th>Hajmi</th><th></th></tr>
@@ -59,7 +70,9 @@ Yopilgandan keyin yangi ish boshlab bo'lmaydi, yozayotganlarning vaqti ham yopil
 
 <section class="card sec" id="security">
 <div class="bar"><h2>Ustoz parolini o'zgartirish</h2></div>
-<form method="post" action="/t/password" class="row" autocomplete="off">
+<form method="post" action="/t/password" class="row" autocomplete="off" data-c-title="Ustoz parolini o'zgartirish" data-c-danger="1"
+  data-c-ok="Keyingi kirishda yangi parol ishlatiladi|Shu qurilmadagi sessiyangiz saqlanadi"
+  data-c-bad="Eski parol endi ishlamaydi|Boshqa qurilmalardagi ustoz kirishlari yopiladi|Yangi parolni yozib qo'ying: tiklash funksiyasi yo'q">
 <div><label>Joriy parol</label><input type="password" name="current" required autocomplete="current-password"></div>
 <div><label>Yangi parol</label><input type="password" name="new" required minlength="8" autocomplete="new-password"></div>
 <div><label>Yangi parol (takror)</label><input type="password" name="confirm" required minlength="8" autocomplete="new-password"></div>

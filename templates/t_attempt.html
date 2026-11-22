@@ -7,6 +7,7 @@
 <h2>{{ att.name }} <span class="mut">({{ att.login }}{% if att.grp %} · {{ att.grp }}{% endif %})</span></h2>
 <p class="mut">{{ att.try_no or 1 }}-urinish · Boshladi: {{ att.started_at|dt }} ·
 {% if att.submitted_at is none %}<b>Yozmoqda, {{ left }} daqiqa qoldi</b>{% else %}Yubordi: {{ att.submitted_at|dt }}{% endif %}</p>
+{% if att.rejected %}<p><span class="tag r">✕ Qabul qilinmagan: imtihon {{ att.submitted_at|dt }} da to'xtatilganda talaba hali yozayotgan edi. Ish baholanmaydi.</span></p>{% endif %}
 {% if att.carry %}<p><span class="tag y">Qayta topshirish chegirmasi: −{{ att.carry|num }} ball</span></p>{% endif %}
 {% if att.disq %}<p><span class="tag r">⛔ Chetlatilgan: {{ strikes }} marta oynadan chiqqan. Baholansa ball 0 bo'ladi.</span></p>
 {% elif strikes %}<p><span class="tag y">Jarima: {{ strikes }} marta chiqqan, avtomatik −{{ deduct|round(0)|int }} ball ayriladi</span></p>{% endif %}
@@ -20,7 +21,10 @@
 <div class="card" style="margin-bottom:18px">
 <h3>{% if att.submitted_at is none %}Vaqt qo'shish{% elif att.disq %}Chetlatishni bekor qilib davom ettirish{% else %}Ishni qayta ochish{% endif %}</h3>
 <form method="post" action="/t/attempt/{{ att.id }}/extend" class="row tight"
-  {% if att.submitted_at is not none %}onsubmit="return confirm('Ish qayta ochilsinmi? Talaba shu ishni davom ettiradi.')"{% endif %}>
+  {% if att.submitted_at is none %}data-c-title="Vaqt qo'shish" data-c-ok="{{ att.name }} ga +{minutes} daqiqa qo'shiladi|Talabaning taymeri 10 soniya ichida yangilanadi"
+  data-c-bad="Qo'shilgan vaqtni qaytarib olib bo'lmaydi"
+  {% else %}data-c-title="Ishni qayta ochish" data-c-ok="{{ att.name }} shu javoblar bilan ishni davom ettiradi|Unga {minutes} daqiqa beriladi{% if att.rejected %}|Ish «Qabul qilinmaganlar» ro'yxatidan chiqadi{% endif %}"
+  data-c-bad="Ish yana «Yozmoqda» holatiga o'tadi{% if att.disq %}|Chetlatish bekor qilinadi, oxirgi jarima kechiriladi{% endif %}"{% endif %}>
 <div><label>Qo'shiladigan daqiqa</label><input type="number" name="minutes" value="10" min="1" max="600"></div>
 <div style="align-self:end"><button class="ok">{% if att.submitted_at is none %}Vaqt qo'shish{% else %}Qayta ochish{% endif %}</button></div>
 </form>
@@ -30,8 +34,10 @@
 </div>
 {% endif %}
 
-{% if att.submitted_at is not none %}
-<form method="post" action="/t/attempt/{{ att.id }}/grade">
+{% if att.submitted_at is not none and not att.rejected %}
+<form method="post" action="/t/attempt/{{ att.id }}/grade" data-c-title="Bahoni saqlash"
+  data-c-ok="{{ att.name }}: jami ball {@tot}|Har bir savol bali va izohlar saqlanadi"
+  data-c-bad="{% if att.graded %}Avvalgi baho shu bilan almashtiriladi{% else %}Natijalar e'lon qilingan bo'lsa, talaba bahoni darhol ko'radi{% endif %}">
 {% for it in items %}
 <div class="card" style="margin-bottom:18px">
 <div class="mut">Savol {{ it.pos }}</div>
@@ -50,7 +56,7 @@
 <span class="mut" style="margin-left:10px">Tekshirilmagan: {{ todo }}</span></div>
 <div class="acts"><a class="btn sec hide-m" href="{{ back_url }}">Orqaga</a>
 <button class="sec" name="go" value="1">Saqlash</button>
-<button class="ok" name="next" value="1">Saqlash va keyingisi →</button></div>
+<button class="ok" name="next" value="1" data-c-title="Saqlash va keyingisiga o'tish">Saqlash va keyingisi →</button></div>
 </div>
 </form>
 <script>
@@ -63,14 +69,16 @@ document.querySelectorAll('.qs button').forEach(b=>b.onclick=()=>{const i=docume
 ins.forEach(i=>i.addEventListener('input',sync));sync();})();
 </script>
 {% else %}
-<div class="card" style="margin-bottom:18px"><h3>Hozirgi javoblar</h3>
-{% for it in items %}<div class="mut">Savol {{ it.pos }}</div><div class="q">{{ it.text }}</div><div class="ans" style="margin-bottom:12px">{{ it.answer or '(hali yozmagan)' }}</div>{% endfor %}
+<div class="card" style="margin-bottom:18px"><h3>{{ 'Yozilgan javoblar (qabul qilinmagan)' if att.rejected else 'Hozirgi javoblar' }}</h3>
+{% for it in items %}<div class="mut">Savol {{ it.pos }}</div><div class="q">{{ it.text }}</div><div class="ans" style="margin-bottom:12px">{{ it.answer or ('(javob yo\'q)' if att.rejected else '(hali yozmagan)') }}</div>{% endfor %}
 </div>
 {% endif %}
 
 <div class="card" style="margin-bottom:18px">
 <h3>Qayta topshirishga ruxsat</h3>
-<form method="post" action="/t/attempt/{{ att.id }}/retake" onsubmit="return confirm('Bu urinish tarixga ko\'chiriladi va talaba qaytadan topshiradi. Davom etasizmi?')">
+<form method="post" action="/t/attempt/{{ att.id }}/retake" data-c-title="Qayta topshirishga ruxsat" data-c-danger="1"
+  data-c-ok="{{ att.name }} nazoratni qaytadan yozadi ({{ dur }} daqiqa)|Chegirma: {carry} ball|Yangi savollar: {new_q}"
+  data-c-bad="Hozirgi urinish{% if att.graded %} va uning bahosi{% endif %} tarixga ko'chiriladi|Chegirma yangi natijadan ayriladi">
 <div class="row tight">
 <div><label>Chegirma (ball)</label><input name="carry" value="{{ suggest|num }}" inputmode="decimal"></div>
 </div>

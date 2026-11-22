@@ -3,11 +3,12 @@
 <main>
 <div class="card noprint" style="margin-bottom:18px">
 <h2>Bitta talaba qo'shish</h2>
-<form method="post" action="/t/students/one">
+<form method="post" action="/t/students/one" data-c-title="Talaba qo'shish"
+  data-c-ok="Yangi talaba: {name}|Guruh: {grp}|Login: {login}, parol: {password}|Unga savollar «Boshlash» paytida biriktiriladi">
 <div class="row tight">
 <div style="grid-column:span 2"><label>F.I.Sh.</label><input name="name" required placeholder="FAMILIYA ISM OTASINING ISMI"></div>
 <div><label>Guruh</label><input name="grp" list="grps" placeholder="masalan 306"></div>
-<div><label>Login (ixtiyoriy)</label><input name="login" placeholder="avtomatik: familiya.ism"></div>
+<div><label>Login (ixtiyoriy)</label><input name="login" placeholder="avtomatik"></div>
 <div><label>Parol (ixtiyoriy)</label><input name="password" placeholder="avtomatik"></div>
 <div style="align-self:end"><button>Qo'shish</button></div>
 </div>
@@ -17,7 +18,9 @@
 
 <details class="card noprint" style="margin-bottom:18px">
 <summary style="cursor:pointer"><b>Ro'yxat bilan qo'shish (ko'p talaba)</b></summary>
-<form method="post" action="/t/students/add" style="margin-top:12px">
+<form method="post" action="/t/students/add" style="margin-top:12px" data-c-title="Ro'yxat bilan qo'shish"
+  data-c-ok="Ro'yxatdagi {@lines} qator talaba sifatida qo'shiladi|Login va parol ko'rsatilmaganlarga avtomatik yaratiladi"
+  data-c-bad="Logini band bo'lgan qatorlar qo'shilmaydi (xabar chiqadi)">
 <label>Har qatorga bitta talaba: <code>Ism; login; parol; guruh</code>. Faqat ism yetarli, qolgani avtomatik. Excel'dan ustunlarni nusxalab qo'ysangiz ham bo'ladi.</label>
 <textarea name="text" required placeholder="ALIYEV VALI KARIMOVICH&#10;KARIMOVA DILNOZA; karimova.dilnoza; dilnoza123&#10;TOSHMATOV JASUR;;;307"></textarea>
 <div class="row tight"><div><label>Guruh (qatorda ko'rsatilmaganlar uchun)</label><input name="grp" list="grps"></div>
@@ -39,7 +42,9 @@
 <td>{{ s.grp or "" }}</td><td>{{ s.name }}</td><td><code>{{ s.login }}</code></td><td><code>{{ s.pw_plain or '' }}</code></td>
 <td class="noprint"><span class="tag {{ 'g' if s.state=='Baholangan' else 'y' if s.state in ('Tekshirilmagan','Yozmoqda') else 'r' if s.state=='Chetlatilgan' else '' }}">{{ s.state }}</span></td>
 <td class="noprint"><div class="acts"><a class="btn sec sm" href="/t/students/{{ s.id }}">Tahrirlash</a>
-<form class="inline" method="post" action="/t/students/delete/{{ s.id }}" onsubmit="return confirm('{{ s.name|e }} o\'chirilsinmi? Natijalari ham o\'chadi.')"><button class="bad sm" title="O'chirish">×</button></form></div></td></tr>
+<form class="inline" method="post" action="/t/students/delete/{{ s.id }}" data-c-title="Talabani o'chirish" data-c-danger="1"
+  data-c-ok="{{ s.name }} ro'yxatdan chiqadi"
+  data-c-bad="Talabaning ishi, javoblari, bahosi va tarixi BUTUNLAY o'chadi|Buni qaytarib bo'lmaydi (faqat zaxiradan)"><button class="bad sm" title="O'chirish">×</button></form></div></td></tr>
 {% endfor %}</table></div></div>
 </main>
 <style>@media print{.side,form,.noprint{display:none!important}body{display:block!important}}</style>

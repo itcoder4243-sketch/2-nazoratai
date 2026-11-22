@@ -3,7 +3,9 @@
 <main>
 <details class="card" style="margin-bottom:18px"{% if not qs %} open{% endif %}>
 <summary style="cursor:pointer"><b>Savollar qo'shish</b></summary>
-<form method="post" action="/t/questions/import" style="margin-top:12px">
+<form method="post" action="/t/questions/import" style="margin-top:12px" data-c-title="Savollarni qo'shish"
+  data-c-ok="Matndagi {@lines} qator savol sifatida bazaga qo'shiladi|Yangi savollar hali boshlamagan talabalarga ham tushishi mumkin"
+  data-c-bad="Bazada bor savollar qayta qo'shilmaydi">
 <label>Har qatorga bitta savol (Word/Excel'dan nusxalab qo'ysangiz bo'ladi). Bazada bor savollar qayta qo'shilmaydi.</label>
 <textarea name="text" required placeholder="1-savol matni&#10;2-savol matni&#10;..."></textarea>
 <p><button>Qo'shish</button></p>
@@ -22,12 +24,16 @@
 <td>{{ q.id }}</td>
 <td>{{ q.text }}
 <details class="ed"><summary class="btn sec sm">Tahrirlash</summary>
-<form method="post" action="/t/questions/edit/{{ q.id }}">
+<form method="post" action="/t/questions/edit/{{ q.id }}" data-c-title="{{ q.id }}-savolni saqlash"
+  data-c-ok="Savol matni yangilanadi"
+  data-c-bad="{% if q.given %}Bu savolni ochgan {{ q.given }} ta talabada ham yangi matn ko'rinadi{% else %}Eski matn saqlanmaydi{% endif %}">
 <textarea name="text" required style="min-height:90px">{{ q.text }}</textarea>
 {% if q.given %}<p class="mut">⚠ Bu savolni {{ q.given }} ta talaba ochgan: o'zgartirsangiz ularda ham yangi matn ko'rinadi.</p>{% endif %}
 <p><button class="sm">Saqlash</button></p></form></details></td>
 <td>{{ q.asg }}</td><td>{{ q.given }}</td>
-<td>{% if not q.given %}<form method="post" action="/t/questions/delete/{{ q.id }}" onsubmit="return confirm('{{ q.id }}-savol o\'chirilsinmi?{% if q.asg %} {{ q.asg }} ta talabaga o\'rniga boshqa savol beriladi.{% endif %}')"><button class="bad sm" title="O'chirish">×</button></form>{% endif %}</td></tr>
+<td>{% if not q.given %}<form method="post" action="/t/questions/delete/{{ q.id }}" data-c-title="{{ q.id }}-savolni o'chirish" data-c-danger="1"
+  data-c-ok="{% if q.asg %}{{ q.asg }} ta talabaga o'rniga boshqa savol biriktiriladi{% else %}Savol hech kimga biriktirilmagan{% endif %}"
+  data-c-bad="Savol bazadan butunlay o'chadi"><button class="bad sm" title="O'chirish">×</button></form>{% endif %}</td></tr>
 {% endfor %}</table></div></div>
 </main>
 {% endblock %}

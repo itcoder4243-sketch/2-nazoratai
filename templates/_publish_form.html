@@ -1,0 +1,12 @@
+{# Natijalarni e'lon qilish / yashirish tugmasi (Dashboard va Sozlamalar) #}
+{% if cfg.results_published %}
+<form method="post" action="/t/publish" data-c-title="Natijalarni yashirish"
+  data-c-ok="Natijalar ustozda saqlanib qoladi, hech narsa o'chmaydi|Istalgan payt qayta e'lon qilishingiz mumkin"
+  data-c-bad="O'quvchilar ball, baho va izohlarni endi ko'rmaydi|Ular faqat «Ish yuborildi» degan yozuvni ko'radi">
+  <input type="hidden" name="on" value="0"><button class="sec {{ btn_cls|default('sm') }}">{{ 'Natijalarni yashirish' if long_label else 'Yashirish' }}</button></form>
+{% else %}
+<form method="post" action="/t/publish" data-c-title="Natijalarni e'lon qilish"
+  data-c-ok="Baholangan o'quvchilar o'z ballari, bahosi va izohlarini ko'radi|Keyin yana yashirish mumkin"
+  data-c-bad="Hali tekshirilmagan ishlar bo'lsa, ularning natijasi baholangach darhol ko'rinadi|E'lon qilingach o'quvchilar natijani ko'rib ulgurishi mumkin">
+  <input type="hidden" name="on" value="1"><button class="ok {{ btn_cls|default('sm') }}">{{ "Natijalarni e'lon qilish" if long_label else "E'lon qilish" }}</button></form>
+{% endif %}

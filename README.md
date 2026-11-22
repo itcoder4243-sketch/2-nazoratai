@@ -21,7 +21,9 @@ Ustoz savollar bazasini yuritadi. Har bir o'quvchiga bazadan alohida **5 ta savo
 - Tekshirish: baholanmagan ishlar navbati va «Saqlash va keyingisi» oqimi.
 - Excel hisobot (.xlsx): natijalar (har savol bali bilan), guruhlar kesimi, taqsimot diagrammasi.
 - Natijalarni e'lon qilish: o'quvchilar ball va izohni faqat ustoz e'lon qilgandan keyin ko'radi.
-- Imtihon vaqti: belgilangan vaqtda avtomatik ochiladi va yopiladi (Toshkent vaqti).
+- Vaqt: sukut bo'yicha har bir talabaga «Boshlash» dan boshlab 60 daqiqa; xohlansa imtihonning boshlanish va tugash vaqti (Toshkent vaqti).
+- Imtihonni to'xtatish: tugma bosilgandan keyin ishlar qabul qilinmaydi, yozayotganlar «Qabul qilinmaganlar» ro'yxatiga tushadi; ustoz ularga nazoratni qayta beradi yoki imtihonni qayta ochadi.
+- Har bir amal tugmasi oldidan tasdiqlash oynasi: nima o'zgaradi (yashil) va nimaga e'tibor berish kerak (qizil), «Davom et» / «Orqaga».
 - Zaxira: har kuni avtomatik zaxira (14 kun saqlanadi), qo'lda zaxira olish va yuklab olish.
 - Ustoz parolini panelning o'zidan o'zgartirish.
 - Telefon: menyu pastki chap tugma orqali chap tomondan chiqadi.

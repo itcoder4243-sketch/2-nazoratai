@@ -12,16 +12,21 @@
   <div class="note {{ 'ok' if cfg.results_published else 'warn' }}">
     <div><b>Natijalar: {{ "e'lon qilingan" if cfg.results_published else 'yashirin' }}</b>
       <span class="mut">{{ "O'quvchilar ball va izohlarni ko'rmoqda" if cfg.results_published else "O'quvchilar faqat «Ish yuborildi» deb ko'radi" }}</span></div>
-    <form method="post" action="/t/publish" {% if not cfg.results_published %}onsubmit="return confirm('Natijalar barcha o'quvchilarga ko'rinadi. Davom etasizmi?')"{% endif %}>
-      <input type="hidden" name="on" value="{{ 0 if cfg.results_published else 1 }}">
-      <button class="sm {{ 'sec' if cfg.results_published else 'ok' }}">{{ 'Yashirish' if cfg.results_published else "E'lon qilish" }}</button></form>
+    {% include "_publish_form.html" %}
   </div>
   <div class="note {{ 'ok' if win.state == 'open' else 'warn' if win.state == 'before' else 'bad' }}">
-    <div><b>Imtihon: {{ {'open': 'ochiq', 'before': 'hali ochilmagan', 'closed': 'yopilgan'}[win.state] }}</b>
-      <span class="mut">{% if win.state == 'before' %}{{ win.open_at|dtf }} da ochiladi{% elif win.close_at and win.state == 'open' %}{{ win.close_at|dtf }} da yopiladi{% elif win.state == 'closed' %}{{ win.close_at|dtf }} da yopildi{% else %}Vaqt cheklovi yo'q{% endif %}</span></div>
-    <a class="btn sec sm" href="/t/settings#window">Sozlash</a>
+    <div><b>Imtihon: {{ {'open': 'ochiq', 'before': 'hali ochilmagan', 'closed': 'yopilgan', 'stopped': "to'xtatilgan"}[win.state] }}</b>
+      <span class="mut">{% if win.state == 'stopped' %}{{ win.stopped_at|dtf }} da to'xtatildi · qabul qilinmadi: {{ stats.rejected }}{% elif win.state == 'before' %}{{ win.open_at|dtf }} da ochiladi{% elif win.close_at and win.state == 'open' %}{{ win.close_at|dtf }} da yopiladi{% elif win.state == 'closed' %}{{ win.close_at|dtf }} da yopildi{% else %}Har bir talabaga boshlagandan {{ cfg.duration_min }} daqiqa{% endif %}</span></div>
+    <div class="acts">{% include "_stop_form.html" %}<a class="btn sec sm" href="/t/settings#window">Sozlash</a></div>
   </div>
 </div>
+{% if stats.rejected %}
+<div class="note bad" style="margin-bottom:18px">
+  <div><b>Qabul qilinmagan ishlar: {{ stats.rejected }} ta</b>
+    <span class="mut">Imtihon to'xtatilganda yozayotgan talabalar. Ularga nazorat ishini qayta berishingiz mumkin.</span></div>
+  <a class="btn sm" href="/t/results#rejected">Ro'yxat va qayta berish</a>
+</div>
+{% endif %}
 
 <div class="kpis">
 <a class="card stat" href="/t/results"><div class="ico">{{ ic('users') }}</div><span class="mut">Topshirdi</span>
@@ -38,12 +43,12 @@
 </div>
 
 {% set n = stats.students or 1 %}
-{% set segs = [('Kirmagan','s-k'),('Yozmoqda','s-y'),('Tekshirilmagan','s-t'),('Chetlatilgan','s-c'),('Baholangan','s-b')] %}
+{% set segs = [('Kirmagan','s-k'),('Yozmoqda','s-y'),('Tekshirilmagan','s-t'),('Chetlatilgan','s-c'),('Baholangan','s-b'),('Qabul qilinmagan','s-r')] %}
 <div class="cols2 wide">
 <div class="card">
   <div class="bar"><h2>Imtihon jarayoni</h2><span class="mut">{{ stats.students }} talaba</span></div>
   <div class="prog">{% for s, c in segs %}{% if stats.cnt[s] %}<i class="{{ c }}" style="width:{{ stats.cnt[s] / n * 100 }}%" title="{{ s }}: {{ stats.cnt[s] }}"></i>{% endif %}{% endfor %}</div>
-  <div class="legend">{% for s, c in segs %}<a class="lgd" href="/t/results?state={{ s }}" data-state-pick="{{ s }}"><i class="{{ c }}"></i>{{ s }} <b>{{ stats.cnt[s] }}</b></a>{% endfor %}</div>
+  <div class="legend">{% for s, c in segs %}{% if s != 'Qabul qilinmagan' or stats.cnt[s] %}<a class="lgd" href="/t/results?state={{ s }}" data-state-pick="{{ s }}"><i class="{{ c }}"></i>{{ s }} <b>{{ stats.cnt[s] }}</b></a>{% endif %}{% endfor %}</div>
   <p class="mut" style="margin:12px 0 0">Holat ustiga bosing: Natijalar sahifasi shu holat bo'yicha filtrlangan holda ochiladi.</p>
 </div>
 <div class="card">
@@ -123,6 +128,6 @@
 <script>
 (function(){const cb=document.getElementById('auto');let on=false;try{on=localStorage.getItem('auto:dash')==='1';}catch(e){}
 cb.checked=on;cb.onchange=()=>{try{localStorage.setItem('auto:dash',cb.checked?'1':'0');}catch(e){}};
-setInterval(()=>{if(cb.checked)location.reload();},30000);})();
+setInterval(()=>{if(cb.checked&&!window.__cfm)location.reload();},30000);})();
 </script>
 {% endblock %}
