@@ -181,6 +181,17 @@ DEFAULTS = {"duration_min": "60", "q_count": "5", "max_per_q": "20", "penalty_po
 # oynadan chiqish/skrinshot urinishlari jarima oladi; nusxa olish urinishlari faqat jurnalga yoziladi
 PENALTY_KINDS = {"tab_hidden", "window_blur", "exit_fullscreen", "printscreen", "screenshot_key", "print"}
 STRIKE_GAP = 5  # soniya: bitta chiqish bir necha hodisa bersa, bitta jarima
+# halollik belgilari: jarima emas, ustozga ko'rsatiladi (internet uzilishi ham shunday ko'rinishi mumkin)
+FLAG_KINDS = {"no_signal": "Signal kelmadi", "hidden_unreported": "Yashirin, lekin chiqish xabari kelmadi",
+              "fast_text": "Juda tez paydo bo'lgan matn"}
+SIGNAL_GAP = 45      # soniya: sahifadan shuncha vaqt signal kelmasa belgilanadi (normal: har 10 s)
+FAST_MIN, FAST_RATE = 200, 12  # shuncha belgidan ko'p va soniyasiga shundan tez paydo bo'lsa (inson yozishi ~1-6 belgi/s)
+FLAG_SQL = ",".join(f"'{k}'" for k in FLAG_KINDS)
+SIM_MIN, SIM_FLAG = 80, 0.6  # o'xshashlik: shundan uzun javoblar solishtiriladi, shundan yuqorisi belgilanadi
+KIND_LABELS = {"tab_hidden": "Boshqa oyna/ilovaga o'tdi", "window_blur": "Oynadan chiqdi", "exit_fullscreen": "To'liq ekrandan chiqdi",
+               "printscreen": "Skrinshot tugmasi", "screenshot_key": "Skrinshot tugmalari", "print": "Chop etishga urindi",
+               "copy": "Nusxa olishga urindi", "cut": "Kesishga urindi", "paste": "Qo'yishga urindi", "paste_big": "Katta matn qo'yildi",
+               "drop": "Matn sudrab tashlandi", "contextmenu": "Kontekst menyu", **FLAG_KINDS}
 
 
 def connect():
@@ -232,6 +243,14 @@ def init_db():
                 "CREATE TABLE IF NOT EXISTS login_fails(k TEXT NOT NULL, ts INTEGER NOT NULL)",
                 "CREATE INDEX IF NOT EXISTS ix_fails ON login_fails(k, ts)",
                 "CREATE INDEX IF NOT EXISTS ix_sess_created ON sessions(created)",
+                # halollik: buzilish ikkinchi kanal (saqlash) orqali ham keladi (cid = takrorlanmasin), server signalni kuzatadi,
+                # javoblar yozilish tarixi (snaps) saqlanadi
+                "ALTER TABLE violations ADD COLUMN cid TEXT",
+                "ALTER TABLE violations ADD COLUMN info TEXT",
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_viol_cid ON violations(attempt_id, cid) WHERE cid IS NOT NULL",
+                "ALTER TABLE attempts ADD COLUMN last_seen INTEGER",
+                "CREATE TABLE IF NOT EXISTS snaps(attempt_id INTEGER NOT NULL, ts INTEGER NOT NULL, chars INTEGER NOT NULL)",
+                "CREATE INDEX IF NOT EXISTS ix_snaps ON snaps(attempt_id, ts)",
                 # indekslar: har saqlash/panel so`rovi butun jadvalni ko`rib chiqmasligi uchun
                 "CREATE INDEX IF NOT EXISTS ix_aq_attempt ON attempt_q(attempt_id)",
                 "CREATE INDEX IF NOT EXISTS ix_aq_question ON attempt_q(question_id)",
@@ -674,25 +693,74 @@ def api_save(data: dict = Body(...), u=Depends(require("student")), conn=Depends
     if not att or att["submitted_at"] is not None:
         return JSONResponse({"ok": False, "submitted": True})
     answers = [(str(v)[:6000], int(k)) for k, v in (data.get("answers") or {}).items() if str(k).isdigit()]
-    if not answers and not data.get("final"):  # o`zgarish yo`q: faqat qolgan vaqt (bazaga yozilmaydi)
-        return JSONResponse({"ok": True, "submitted": False, "remaining": max(0, att["deadline"] - int(time.time()))})
+    events = [e for e in (data.get("v") or [])[:20] if isinstance(e, dict)]
+    now = int(time.time())
+    disq = False
     conn.execute("BEGIN")
     try:
-        # bir xil matn qayta yozilmaydi (IS NOT): diskka yozuv faqat haqiqiy o`zgarishda
-        conn.executemany("UPDATE attempt_q SET answer=? WHERE id=? AND attempt_id=? AND answer IS NOT ?",
-                         [(a, i, att["id"], a) for a, i in answers])
+        # signal: sahifa har 10 s da saqlash yuboradi; uzoq tanaffus ustozga belgilanadi
+        if att["last_seen"] and now - att["last_seen"] > SIGNAL_GAP:
+            add_flag(conn, att["id"], now, "no_signal", f"{now - att['last_seen']} soniya signal yo'q")
+        conn.execute("UPDATE attempts SET last_seen=? WHERE id=?", (now, att["id"]))
+        # buzilishlar ikkinchi kanal orqali ham keladi: /api/violation to'sib qo'yilsa ham yetib boradi
+        for e in events:
+            disq = record_violation(conn, att, e.get("kind"), str(e.get("id", ""))[:40] or None)["disq"] or disq
+        # sahifa "yashirin" deyapti, lekin so'nggi daqiqada chiqish xabari yo'q: buzilish kodi o'chirilgan bo'lishi mumkin
+        if data.get("vis") == "h" and data.get("a") and not conn.execute(
+                "SELECT 1 FROM violations WHERE attempt_id=? AND ts>=? AND kind IN ('tab_hidden','window_blur','exit_fullscreen','hidden_unreported')",
+                (att["id"], now - 60)).fetchone():
+            add_flag(conn, att["id"], now, "hidden_unreported", "sahifa yashirin holatda yozildi")
+        if answers and not disq:
+            old = {r["id"]: (r["pos"], r["n"]) for r in conn.execute(
+                "SELECT id, pos, LENGTH(answer) n FROM attempt_q WHERE attempt_id=?", (att["id"],))}
+            # bir xil matn qayta yozilmaydi (IS NOT): diskka yozuv faqat haqiqiy o`zgarishda
+            changed = sum(conn.execute("UPDATE attempt_q SET answer=? WHERE id=? AND attempt_id=? AND answer IS NOT ?",
+                                       (a, i, att["id"], a)).rowcount for a, i in answers)
+            if changed:
+                last = conn.execute("SELECT MAX(ts) FROM snaps WHERE attempt_id=?", (att["id"],)).fetchone()[0] or att["started_at"]
+                dt = max(1, now - last)
+                for a, i in answers:
+                    if i in old and len(a) - (old[i][1] or 0) > FAST_MIN and (len(a) - (old[i][1] or 0)) / dt > FAST_RATE:
+                        add_flag(conn, att["id"], now, "fast_text", f"{old[i][0]}-savol: +{len(a) - (old[i][1] or 0)} belgi {dt} soniyada")
+                total = conn.execute("SELECT SUM(LENGTH(answer)) FROM attempt_q WHERE attempt_id=?", (att["id"],)).fetchone()[0] or 0
+                conn.execute("INSERT INTO snaps(attempt_id,ts,chars) VALUES(?,?,?)", (att["id"], now, total))
         # taymer tugadi deb kelgan avtomatik yuborish: ustoz vaqt qo`shgan bo`lsa yubormaymiz
-        final = bool(data.get("final")) and not (data.get("auto") and att["deadline"] > time.time() + 3)
+        final = not disq and bool(data.get("final")) and not (data.get("auto") and att["deadline"] > time.time() + 3)
         if final:
             # ustoz shu orada imtihonni to'xtatgan bo'lsa, ish qabul qilinmagan holicha qoladi
-            conn.execute("UPDATE attempts SET submitted_at=? WHERE id=? AND submitted_at IS NULL", (int(time.time()), att["id"]))
+            conn.execute("UPDATE attempts SET submitted_at=? WHERE id=? AND submitted_at IS NULL", (now, att["id"]))
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
-    if final:
-        return JSONResponse({"ok": True, "submitted": True})
-    return JSONResponse({"ok": True, "submitted": False, "remaining": max(0, att["deadline"] - int(time.time()))})
+    if final or disq:
+        return JSONResponse({"ok": True, "submitted": True, "vdone": [str(e.get("id")) for e in events]})
+    return JSONResponse({"ok": True, "submitted": False, "remaining": max(0, att["deadline"] - now),
+                         "strikes": strike_count(conn, att["id"]), "vdone": [str(e.get("id")) for e in events]})
+
+
+def add_flag(conn, aid, ts, kind, info):
+    conn.execute("INSERT INTO violations(attempt_id,ts,kind,penalty,info) VALUES(?,?,?,0,?)", (aid, ts, kind, info))
+
+
+def record_violation(conn, att, kind, cid=None):
+    """Talaba sahifasidan kelgan buzilish (ikki kanaldan biri orqali, cid bilan takrorlanmaydi)."""
+    kind = re.sub(r"[^a-z_]", "", str(kind or "")[:30]) or "other"
+    if kind in FLAG_KINDS:  # bu belgilarni faqat server qo'yadi
+        kind = "other"
+    if cid and conn.execute("SELECT 1 FROM violations WHERE attempt_id=? AND cid=?", (att["id"], cid)).fetchone():
+        return {"strike": False, "disq": False, "dup": True}
+    now = int(time.time())
+    pen = 0
+    if kind in PENALTY_KINDS:
+        last = conn.execute("SELECT MAX(ts) m FROM violations WHERE attempt_id=? AND penalty=1",
+                            (att["id"],)).fetchone()["m"]
+        pen = 1 if (last is None or now - last >= STRIKE_GAP) else 0
+    conn.execute("INSERT OR IGNORE INTO violations(attempt_id,ts,kind,penalty,cid) VALUES(?,?,?,?,?)", (att["id"], now, kind, pen, cid))
+    disq = bool(pen and strike_count(conn, att["id"]) >= setting(conn, "max_strikes"))
+    if disq:
+        conn.execute("UPDATE attempts SET submitted_at=?, disq=1 WHERE id=? AND submitted_at IS NULL", (now, att["id"]))
+    return {"strike": bool(pen), "disq": disq}
 
 
 @app.post("/api/violation")
@@ -700,21 +768,10 @@ def api_violation(data: dict = Body(...), u=Depends(require("student")), conn=De
     att = get_attempt(conn, u["id"])
     if not att or att["submitted_at"] is not None:
         return JSONResponse({"submitted": True})
-    kind = re.sub(r"[^a-z_]", "", str(data.get("kind", ""))[:30]) or "other"
-    now = int(time.time())
-    pen = 0
-    if kind in PENALTY_KINDS:
-        last = conn.execute("SELECT MAX(ts) m FROM violations WHERE attempt_id=? AND penalty=1",
-                            (att["id"],)).fetchone()["m"]
-        pen = 1 if (last is None or now - last >= STRIKE_GAP) else 0
-    conn.execute("INSERT INTO violations(attempt_id,ts,kind,penalty) VALUES(?,?,?,?)", (att["id"], now, kind, pen))
+    r = record_violation(conn, att, data.get("kind"), str(data.get("id", ""))[:40] or None)
     strikes = strike_count(conn, att["id"])
-    ms, pp = setting(conn, "max_strikes"), setting(conn, "penalty_points")
-    disq = bool(pen and strikes >= ms)
-    if disq:
-        conn.execute("UPDATE attempts SET submitted_at=?, disq=1 WHERE id=? AND submitted_at IS NULL", (now, att["id"]))
-    return JSONResponse({"strike": bool(pen), "strikes": strikes, "max": ms, "penalty": pp,
-                         "disq": disq, "submitted": disq})
+    return JSONResponse({"strike": r["strike"], "strikes": strikes, "max": setting(conn, "max_strikes"),
+                         "penalty": setting(conn, "penalty_points"), "disq": r["disq"], "submitted": r["disq"]})
 
 
 def strike_count(conn, aid):
@@ -743,7 +800,8 @@ def results_data(conn):
     rows = conn.execute(
         "SELECT u.id uid, u.name, u.login, u.grp, u.carry ucarry, a.id aid, a.started_at, a.deadline, a.submitted_at, "
         "a.total, a.graded, a.graded_at, a.disq, a.carry, a.try_no, a.rejected, "
-        "(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.penalty=1) viol "
+        "(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.penalty=1) viol, "
+        f"(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.kind IN ({FLAG_SQL})) flags "
         "FROM users u LEFT JOIN attempts a ON a.user_id=u.id WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
     rows = [dict(r) for r in rows]
     now = time.time()
@@ -1037,6 +1095,7 @@ def teacher_student_delete(uid: int, u=Depends(require("teacher")), conn=Depends
     att = conn.execute("SELECT id FROM attempts WHERE user_id=?", (uid,)).fetchone()
     if att:
         conn.execute("DELETE FROM violations WHERE attempt_id=?", (att["id"],))
+        conn.execute("DELETE FROM snaps WHERE attempt_id=?", (att["id"],))
         conn.execute("DELETE FROM attempt_q WHERE attempt_id=?", (att["id"],))
         conn.execute("DELETE FROM attempts WHERE id=?", (att["id"],))
     conn.execute("DELETE FROM assigned WHERE user_id=?", (uid,))
@@ -1071,13 +1130,54 @@ def teacher_attempt(aid: int, request: Request, u=Depends(require("teacher")), c
         (aid,)).fetchall()
     viol = conn.execute("SELECT * FROM violations WHERE attempt_id=? ORDER BY ts", (aid,)).fetchall()
     strikes = strike_count(conn, aid)
+    sims = {it["id"]: similar_answers(conn, it) for it in items}
     hist = [dict(h, d=json.loads(h["data"])) for h in
             conn.execute("SELECT * FROM history WHERE user_id=? ORDER BY ts", (att["user_id"],))]
     return render(request, "t_attempt.html", user=u, att=att, items=items, viol=viol, mx=setting(conn, "max_per_q"),
                   strikes=strikes, deduct=calc_deduct(conn, att, strikes), hist=hist,
                   suggest=default_carry(conn, att), left=max(0, int((att["deadline"] - time.time()) // 60)),
                   todo=conn.execute("SELECT COUNT(*) c FROM attempts WHERE graded=0 AND rejected=0 AND submitted_at IS NOT NULL").fetchone()["c"],
-                  carry=att["carry"] or 0, dur=setting(conn, "duration_min"))
+                  carry=att["carry"] or 0, dur=setting(conn, "duration_min"), labels=KIND_LABELS,
+                  flags=[v for v in viol if v["kind"] in FLAG_KINDS], sims=sims, chart=typing_chart(conn, att, viol))
+
+
+def shingles(text):
+    w = re.findall(r"\w+", (text or "").lower())
+    return {" ".join(w[i:i + 3]) for i in range(len(w) - 2)}
+
+
+def similar_answers(conn, it):
+    """Shu savolga boshqa talabalar yozgan javoblardan eng o'xshashlari (so'z 3-gramma Jaccard)."""
+    if len((it["answer"] or "").strip()) < SIM_MIN:
+        return []
+    mine, out = shingles(it["answer"]), []
+    for r in conn.execute("SELECT aq.answer, u.name, a.id aid FROM attempt_q aq JOIN attempts a ON a.id=aq.attempt_id "
+                          "JOIN users u ON u.id=a.user_id WHERE aq.question_id=? AND aq.attempt_id<>? AND LENGTH(aq.answer)>=?",
+                          (it["question_id"], it["attempt_id"], SIM_MIN)):
+        other = shingles(r["answer"])
+        if mine and other:
+            j = len(mine & other) / len(mine | other)
+            if j >= SIM_FLAG:
+                out.append({"name": r["name"], "aid": r["aid"], "pct": round(j * 100)})
+    return sorted(out, key=lambda x: -x["pct"])[:5]
+
+
+def typing_chart(conn, att, viol):
+    """Javoblar hajmi vaqt bo'yicha (SVG nuqtalari): tabiiy yozish asta o'sadi, ko'chirilgan matn sakraydi."""
+    snaps = conn.execute("SELECT ts, chars FROM snaps WHERE attempt_id=? ORDER BY ts", (att["id"],)).fetchall()
+    if not snaps:
+        return None
+    t0 = att["started_at"]
+    t1 = max(att["submitted_at"] or att["deadline"], snaps[-1]["ts"], t0 + 60)
+    top = max(max(r["chars"] for r in snaps), 1)
+    W, H = 600, 120
+    X = lambda t: round(min(max(t - t0, 0), t1 - t0) / (t1 - t0) * W, 1)
+    Y = lambda c: round(H - c / top * (H - 6), 1)
+    pts = [(0, H)] + [(X(r["ts"]), Y(r["chars"])) for r in snaps]
+    marks = [{"x": X(v["ts"]), "fast": v["kind"] == "fast_text"} for v in viol
+             if v["penalty"] == 1 or v["kind"] == "fast_text"]
+    return {"W": W, "H": H, "pts": " ".join(f"{x},{y}" for x, y in pts), "marks": marks, "top": top,
+            "mins": round((t1 - t0) / 60)}
 
 
 def calc_deduct(conn, att, strikes):
@@ -1160,6 +1260,7 @@ def do_retake(conn, aid, carry=None, new_q=True):
         for i in items:
             conn.execute("INSERT INTO assigned(user_id,question_id,pos) VALUES(?,?,?)", (uid, i["question_id"], i["pos"]))
     conn.execute("DELETE FROM violations WHERE attempt_id=?", (aid,))
+    conn.execute("DELETE FROM snaps WHERE attempt_id=?", (aid,))
     conn.execute("DELETE FROM attempt_q WHERE attempt_id=?", (aid,))
     conn.execute("DELETE FROM attempts WHERE id=?", (aid,))
     # ustoz ruxsati: imtihon to'xtatilgan yoki yopilgan bo'lsa ham shu talaba boshlay oladi

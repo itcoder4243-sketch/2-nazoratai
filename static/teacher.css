@@ -242,3 +242,11 @@ body.t main p a:not(.btn),body.t .empty a:not(.btn){color:#a5abff}
 .me form.lo{margin:0 0 0 auto}
 .me form.lo button{background:none;box-shadow:none;border:0;color:var(--mut);display:grid;place-items:center;padding:6px;min-height:0;border-radius:8px}
 .me form.lo button:hover{color:#fff;background:rgba(255,255,255,.08);transform:none}
+
+/* halollik: yozish grafigi */
+svg.tl{display:block;width:100%;height:120px;color:#74c0fc;background:rgba(127,140,170,.10);border-radius:8px}
+svg.tl .mf{stroke:#ffa94d;stroke-width:2;stroke-dasharray:4 3}
+svg.tl .mp{stroke:#ff6b6b;stroke-width:1.5}
+.tll{display:flex;gap:16px;margin:4px 0 10px;font-size:13px}
+.tll i{display:inline-block;width:14px;height:0;border-top:2px dashed #ffa94d;vertical-align:middle}
+.tll i.mp{border-top:2px solid #ff6b6b}

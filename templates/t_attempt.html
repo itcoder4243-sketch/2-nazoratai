@@ -13,8 +13,25 @@
 {% elif strikes %}<p><span class="tag y">Jarima: {{ strikes }} marta chiqqan, avtomatik −{{ deduct|round(0)|int }} ball ayriladi</span></p>{% endif %}
 {% if viol %}
 <details><summary class="tag r" style="cursor:pointer">Jurnal: {{ viol|length }} hodisa</summary>
-<table>{% for v in viol %}<tr><td>{{ v.ts|dt }}</td><td>{{ v.kind }}</td><td>{{ '⚠ jarima' if v.penalty == 1 else 'kechirildi' if v.penalty == 2 else '' }}</td></tr>{% endfor %}</table></details>
+<table>{% for v in viol %}<tr><td>{{ v.ts|dt }}</td><td>{{ labels.get(v.kind, v.kind) }}{% if v.info %} <span class="mut">· {{ v.info }}</span>{% endif %}</td><td>{{ '⚠ jarima' if v.penalty == 1 else 'kechirildi' if v.penalty == 2 else '⚑ belgi' if v.kind in labels and v.penalty == 0 and v.kind in ['no_signal','hidden_unreported','fast_text'] else '' }}</td></tr>{% endfor %}</table></details>
 {% else %}<span class="tag g">Buzilish yo'q</span>{% endif %}
+</div>
+
+{% set simq = sims.values()|select|list %}
+<div class="card" style="margin-bottom:18px">
+<h3>Halollik {% if flags or simq %}<span class="tag y">⚑ {{ flags|length + simq|length }}</span>{% else %}<span class="tag g">belgi yo'q</span>{% endif %}</h3>
+<p class="mut">Bu belgilar jarima emas, faqat sizga ma'lumot: internet uzilishi ham «signal kelmadi» bo'lib ko'rinishi mumkin. Qaror sizniki.</p>
+{% if chart %}
+<div class="mut" style="margin:8px 0 4px">Javoblar hajmi vaqt bo'yicha (0 → {{ chart.mins }} daqiqa, eng ko'pi {{ chart.top }} belgi). Tabiiy yozish asta o'sadi; tik sakrash — matn birdan paydo bo'lgan.</div>
+<svg class="tl" viewBox="0 0 {{ chart.W }} {{ chart.H }}" preserveAspectRatio="none" role="img" aria-label="Yozish grafigi">
+<polyline points="{{ chart.pts }}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/>
+{% for m in chart.marks %}<line x1="{{ m.x }}" x2="{{ m.x }}" y1="0" y2="{{ chart.H }}" class="{{ 'mf' if m.fast else 'mp' }}" vector-effect="non-scaling-stroke"/>{% endfor %}
+</svg>
+<div class="mut tll"><span><i class="mf"></i> tez paydo bo'lgan matn</span> <span><i class="mp"></i> jarima (oynadan chiqish)</span></div>
+{% endif %}
+{% if flags %}<table>{% for v in flags %}<tr><td>{{ v.ts|dt }}</td><td>⚑ {{ labels[v.kind] }}</td><td class="mut">{{ v.info or '' }}</td></tr>{% endfor %}</table>{% endif %}
+{% for it in items %}{% if sims[it.id] %}<p>⚑ <b>{{ it.pos }}-savol</b> javobi boshqa talabalarnikiga o'xshash:
+{% for o in sims[it.id] %}<a href="/t/attempt/{{ o.aid }}">{{ o.name }}</a> ({{ o.pct }}%){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}{% endfor %}
 </div>
 
 {% if not att.graded %}

@@ -56,8 +56,12 @@ const sent={};tas.forEach(t=>sent[t.dataset.id]=t.value);
 function changed(){const a={};tas.forEach(t=>{if(sent[t.dataset.id]!==t.value)a[t.dataset.id]=t.value;});return a;}
 async function save(final,auto){
   const a=final?collect():changed();
-  const r=await post('/api/save',{answers:a,final:!!final,auto:!!auto});
+  // har saqlash serverga "sahifa tirik" signali ham: ko'rinish holati va hali yetib bormagan buzilishlar
+  const v=pend.slice(0,20);
+  const r=await post('/api/save',{answers:a,final:!!final,auto:!!auto,v,vis:document.hidden?'h':'v',a:armed?1:0});
   if(r&&r.ok)Object.assign(sent,a);
+  if(r&&r.vdone)pend=pend.filter(e=>!r.vdone.includes(e.id));
+  if(r&&typeof r.strikes==='number'&&r.strikes>STRIKES){STRIKES=r.strikes;showStrike();}
   if(r&&r.submitted){finish();return;}
   if(r&&typeof r.remaining==='number')end=Date.now()+r.remaining*1000; // ustoz vaqt qo'shgan bo'lsa
   $('#saved').textContent=r?'✓ saqlandi '+new Date().toLocaleTimeString().slice(0,5):'⚠ aloqa yo\'q';
@@ -79,11 +83,14 @@ setInterval(async()=>{
 
 const gate=$('#gate');
 // --- buzilishlar ---
-let lastV=0;
+let lastV=0, pend=[];
 async function violation(kind){
   if(done||!armed)return;
   const now=Date.now(); if(now-lastV<1500)return; lastV=now;
-  const r=await post('/api/violation',{kind});
+  // ikki kanal: darhol /api/violation, yetib bormasa keyingi saqlash bilan (server id bo'yicha takrorlamaydi)
+  const e={id:now.toString(36)+Math.random().toString(36).slice(2,8),kind};pend.push(e);
+  const r=await post('/api/violation',e);
+  if(r)pend=pend.filter(x=>x!==e);
   if(r&&r.submitted){finish();return;}
   if(r&&r.strike){STRIKES=r.strikes;showStrike();}
 }
@@ -117,14 +124,21 @@ tas.forEach(t=>{
   t.addEventListener('input',()=>{ // bir zumda katta matn paydo bo'lsa: qo'yish deb hisoblab bekor qilamiz
     if(t.value.length-last.length>25){t.value=last;violation('paste_big');}else last=t.value;});
 });
-document.addEventListener('visibilitychange',()=>{if(document.hidden)violation('tab_hidden');});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)violation('tab_hidden');else{keepAwake();save(false);}});
 window.addEventListener('blur',()=>violation('window_blur'));
 window.addEventListener('beforeprint',()=>violation('print'));
 window.addEventListener('beforeunload',e=>{if(!done){e.preventDefault();e.returnValue='';}});
 
+// --- ekran o'chmasin (iPhone/Android avto-qulflash "chiqish" deb hisoblanmasligi uchun) ---
+let wl=null;
+async function keepAwake(){try{if('wakeLock' in navigator&&!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>wl=null);}}catch(e){}}
+const IOS=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+if(IOS&&!('wakeLock' in navigator))$('#gmsg').textContent+=" iPhone: ekran o'zi qulflanmasligi uchun Sozlamalar → Ekran va yorqinlik → Avto-qulflash → Hech qachon.";
+
 // --- to'liq ekran ---
 function needFS(msg){if(done)return;gate.classList.add('show');$('#gmsg').textContent=msg||$('#gmsg').textContent;}
 $('#gbtn').onclick=async()=>{
+  keepAwake();
   if(document.documentElement.requestFullscreen){try{await document.documentElement.requestFullscreen();}catch(e){}}
   gate.classList.remove('show');setTimeout(()=>armed=true,800);};
 document.addEventListener('fullscreenchange',()=>{

@@ -39,7 +39,7 @@ t = client(); login(t, "ustoz", "ustoz123")
 t.post("/t/publish", data={"on": "1"})  # natijalar o'quvchilarga ko'rinsin
 assert "Tekshirilmagan" in t.get("/t/results").text
 aid = A.connect().execute("SELECT id FROM attempts LIMIT 1").fetchone()["id"]
-page = t.get(f"/t/attempt/{aid}"); assert "tab_hidden" in page.text
+page = t.get(f"/t/attempt/{aid}"); assert "Boshqa oyna/ilovaga o&#39;tdi" in page.text or "Boshqa oyna/ilovaga o'tdi" in page.text
 conn = A.connect()
 qs = conn.execute("SELECT id FROM attempt_q WHERE attempt_id=?", (aid,)).fetchall()
 form = {"comment": "Yaxshi ish"}

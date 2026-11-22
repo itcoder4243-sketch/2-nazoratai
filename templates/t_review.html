@@ -31,7 +31,7 @@
   <tr data-q="{{ (r.name ~ ' ' ~ r.login)|lower }}" data-grp="{{ r.grp or '' }}" data-state="{{ r.state }}">
     <td>{{ r.name }}<div class="mut">{{ r.login }}{% if r.try_no and r.try_no > 1 %} · {{ r.try_no }}-urinish{% endif %}</div></td>
     <td>{{ r.grp or '' }}</td><td>{{ r.submitted_at|dt }}</td>
-    <td>{% if r.viol %}<span class="tag r">{{ r.viol }}</span>{% else %}–{% endif %}</td>
+    <td>{% if r.viol %}<span class="tag r">{{ r.viol }}</span>{% endif %}{% if r.flags %} <span class="tag y" title="Halollik belgilari (jarima emas)">⚑{{ r.flags }}</span>{% endif %}{% if not r.viol and not r.flags %}–{% endif %}</td>
     <td><span class="tag {{ 'r' if r.state == 'Chetlatilgan' else 'y' }}">{{ r.state }}</span></td>
     <td><a class="btn sm" href="/t/attempt/{{ r.aid }}">Tekshirish</a></td></tr>
   {% endfor %}</table></div>
