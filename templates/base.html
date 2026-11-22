@@ -2,14 +2,14 @@
 <html lang="uz"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>{% block title %}Nazorat ishi{% endblock %}</title>
-<link rel="stylesheet" href="/static/style.css?v=8"></head>
+<link rel="stylesheet" href="/static/style.css?v=9"></head>
 <body class="{% block bodyclass %}{% endblock %}">
 {% block header %}
 <header><b>📚 Nazorat ishi</b>
 {% if user and user.role == 'teacher' %}
 <a href="/t">Natijalar</a><a href="/t/questions">Savollar</a><a href="/t/students">Talabalar</a>
 {% endif %}
-<span class="sp"></span>{% if user %}<span class="mut">{{ user.name }}</span><a href="/logout">Chiqish</a>{% endif %}
+<span class="sp"></span>{% if user %}<span class="mut">{{ user.name }}</span><form method="post" action="/logout" class="lo"><button type="submit">Chiqish</button></form>{% endif %}
 </header>
 {% endblock %}
 {% block body %}{% endblock %}

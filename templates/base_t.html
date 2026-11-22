@@ -2,8 +2,8 @@
 <html lang="uz"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ustoz paneli · Nazorat</title>
-<link rel="stylesheet" href="/static/style.css?v=8">
-<link rel="stylesheet" href="/static/teacher.css?v=12"></head>
+<link rel="stylesheet" href="/static/style.css?v=9">
+<link rel="stylesheet" href="/static/teacher.css?v=13"></head>
 <body class="t">
 <div class="shell">
 <aside class="side" id="side" aria-label="Asosiy menyu">
@@ -18,8 +18,8 @@
     <a href="/t/settings" class="{{ 'on' if p.startswith('/t/settings') }}">{{ ic('settings') }}<span>Sozlamalar</span></a>
   </nav>
   <div class="me"><div class="av">{{ user.name[:1] }}</div><div><b>{{ user.name }}</b><small>Administrator</small></div>
-    <a href="/logout" title="Chiqish" data-c-title="Tizimdan chiqish" data-c-ok="Ustoz panelidan chiqasiz|Qayta kirish uchun login va parol kerak bo'ladi"
-      data-c-bad="Saqlanmagan baholar va o'zgarishlar yo'qoladi">{{ ic('logout') }}</a></div>
+    <form method="post" action="/logout" class="lo" data-c-title="Tizimdan chiqish" data-c-ok="Ustoz panelidan chiqasiz|Qayta kirish uchun login va parol kerak bo'ladi"
+      data-c-bad="Saqlanmagan baholar va o'zgarishlar yo'qoladi"><button type="submit" title="Chiqish" aria-label="Chiqish">{{ ic('logout') }}</button></form></div>
 </aside>
 <div class="scrim" id="scrim" hidden></div>
 <button type="button" class="navbtn" id="navbtn" aria-label="Menyuni ochish" aria-controls="side" aria-expanded="false">

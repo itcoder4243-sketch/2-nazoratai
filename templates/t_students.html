@@ -39,7 +39,7 @@
 <div class="tbl"><table id="stl"><tr><th>Guruh</th><th>Ism</th><th>Login</th><th>Parol</th><th class="noprint">Holat</th><th class="noprint"></th></tr>
 {% for s in st %}
 <tr data-q="{{ (s.name ~ ' ' ~ s.login)|lower }}" data-grp="{{ s.grp or '' }}" data-state="{{ s.state }}">
-<td>{{ s.grp or "" }}</td><td>{{ s.name }}</td><td><code>{{ s.login }}</code></td><td><code>{{ s.pw_plain or '' }}</code></td>
+<td>{{ s.grp or "" }}</td><td>{{ s.name }}</td><td><code>{{ s.login }}</code></td><td><code>{{ s.pw_plain|pw }}</code></td>
 <td class="noprint"><span class="tag {{ 'g' if s.state=='Baholangan' else 'y' if s.state in ('Tekshirilmagan','Yozmoqda') else 'r' if s.state=='Chetlatilgan' else '' }}">{{ s.state }}</span></td>
 <td class="noprint"><div class="acts"><a class="btn sec sm" href="/t/students/{{ s.id }}">Tahrirlash</a>
 <form class="inline" method="post" action="/t/students/delete/{{ s.id }}" data-c-title="Talabani o'chirish" data-c-danger="1"

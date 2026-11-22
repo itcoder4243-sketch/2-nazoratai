@@ -4,7 +4,7 @@
 <p><a class="btn sec sm" href="/t/students">← Talabalar</a></p>
 <div class="card" style="margin-bottom:18px">
 <h2>{{ s.name }}</h2>
-<p class="mut">Login: <code>{{ s.login }}</code> · Parol: <code>{{ s.pw_plain or '—' }}</code>{% if s.grp %} · Guruh: {{ s.grp }}{% endif %}</p>
+<p class="mut">Login: <code>{{ s.login }}</code> · Parol: <code>{{ (s.pw_plain|pw) or '—' }}</code>{% if s.grp %} · Guruh: {{ s.grp }}{% endif %}</p>
 <p>{% if att %}<a class="btn sm" href="/t/attempt/{{ att.id }}">Ishini ko'rish ({{ att.try_no or 1 }}-urinish)</a>
 {% else %}<span class="tag">Hali boshlamagan</span>{% endif %}
 {% if s.carry and not att %} <span class="tag y">Qayta topshiradi: natijadan −{{ s.carry|num }} ball</span>{% endif %}</p>

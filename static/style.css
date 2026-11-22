@@ -110,3 +110,5 @@ header b{white-space:nowrap}
 header .mut{min-width:0;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 header a{flex:none}
 .ok-msg{color:var(--ok);font-weight:600}
+header form.lo{margin:0}header form.lo button{background:none;color:#4a5775;padding:0;min-height:0;font-size:15px;box-shadow:none}
+header form.lo button:hover{color:var(--pri)}

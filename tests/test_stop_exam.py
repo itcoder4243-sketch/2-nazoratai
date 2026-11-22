@@ -127,7 +127,7 @@ for p in pages:
 check("har bir POST forma tasdiqlash matniga ega", not missing, missing[:3])
 h = T.get("/t").text
 check("tasdiqlash oynasi: Davom et va Orqaga tugmalari", "Davom et" in h and "Orqaga" in h and "cfm-ok" in h and "cfm-bad" in h)
-check("chiqish havolasi ham tasdiqlanadi", re.search(r'href="/logout"[^>]*data-c-title', h))
+check("chiqish havolasi ham tasdiqlanadi", re.search(r'action="/logout"[^>]*data-c-title', h))
 
 print("\nNATIJA:", "HAMMASI TO'G'RI" if ok_all else "XATOLAR BOR")
 sys.exit(0 if ok_all else 1)

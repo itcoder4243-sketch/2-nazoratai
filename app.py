@@ -3,8 +3,10 @@
 Copyright (c) 2026 SoliyevNurbek (Nurbek Soliyev). Barcha huquqlar himoyalangan.
 Ruxsatsiz nusxalash, tarqatish yoki tijoriy foydalanish taqiqlanadi (LICENSE ga qarang).
 """
+import base64
 import csv
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -74,6 +76,87 @@ class StaticCache:
 
 
 app.add_middleware(StaticCache)
+
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+       "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+SEC_HEADERS = [(b"x-frame-options", b"DENY"), (b"x-content-type-options", b"nosniff"),
+               (b"referrer-policy", b"same-origin"), (b"content-security-policy", CSP.encode()),
+               (b"permissions-policy", b"camera=(), microphone=(), geolocation=(), payment=()"),
+               (b"cross-origin-opener-policy", b"same-origin")]
+if COOKIE_SECURE:  # faqat HTTPS orqali ishlaganda
+    SEC_HEADERS.append((b"strict-transport-security", b"max-age=31536000"))
+
+
+def body_limit(path):
+    """So'rov tanasining eng katta hajmi (bayt): javob saqlash ~100 KB, savol/talaba ro'yxati yuklash ~1 MB."""
+    if path == "/login":
+        return 16 * 1024
+    if path.startswith("/api/"):
+        return 256 * 1024
+    return 2 * 1024 * 1024
+
+
+class Security:
+    """Xavfsizlik sarlavhalari, so'rov hajmi cheklovi va texnik *.up.railway.app domenidan asosiy domenga yo'naltirish."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        path = scope["path"]
+        hdrs = dict(scope.get("headers") or [])
+        host = hdrs.get(b"host", b"").decode("latin-1").split(":")[0]
+        canon = os.environ.get("CANONICAL_HOST")
+        if canon and host.endswith(".up.railway.app"):
+            q = scope.get("query_string", b"").decode("latin-1")
+            await Response(status_code=308, headers={"location": f"https://{canon}{path}" + (f"?{q}" if q else "")})(scope, receive, send)
+            return
+        limit = body_limit(path)
+        try:
+            clen = int(hdrs.get(b"content-length", b"0") or 0)
+        except ValueError:
+            clen = limit + 1
+        if clen > limit:
+            await Response("So'rov juda katta", status_code=413, headers={"connection": "close"})(scope, receive, send)
+            return
+        got = 0
+
+        async def receive2():  # Content-Length ko'rsatilmagan (chunked) so'rovlar uchun ham
+            nonlocal got
+            msg = await receive()
+            if msg["type"] == "http.request":
+                got += len(msg.get("body", b""))
+                if got > limit:
+                    raise TooLarge()
+            return msg
+
+        started = False
+
+        async def send2(msg):
+            nonlocal started
+            if msg["type"] == "http.response.start":
+                started = True
+                h = list(msg.get("headers", []))
+                names = {k.lower() for k, _ in h}
+                h += [x for x in SEC_HEADERS if x[0] not in names]
+                if not path.startswith("/static/") and b"cache-control" not in names:
+                    h.append((b"cache-control", b"no-store"))  # umumiy kompyuterda parol/natija keshda qolmasin
+                msg["headers"] = h
+            await send(msg)
+        try:
+            await self.app(scope, receive2, send2)
+        except TooLarge:
+            if not started:
+                await Response("So'rov juda katta", status_code=413, headers={"connection": "close"})(scope, receive, send)
+
+
+class TooLarge(Exception):
+    pass
+
+
+app.add_middleware(Security)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
@@ -145,6 +228,10 @@ def init_db():
                 # imtihon to'xtatilganda yozilayotgan ish qabul qilinmaydi; ustoz qayta ruxsat bersa, talaba yopiq vaqtda ham boshlaydi
                 "ALTER TABLE attempts ADD COLUMN rejected INTEGER DEFAULT 0",
                 "ALTER TABLE users ADD COLUMN reopen INTEGER DEFAULT 0",
+                # noto'g'ri kirishlar jurnali: barcha worker'lar uchun umumiy (login+IP va IP bo'yicha cheklov)
+                "CREATE TABLE IF NOT EXISTS login_fails(k TEXT NOT NULL, ts INTEGER NOT NULL)",
+                "CREATE INDEX IF NOT EXISTS ix_fails ON login_fails(k, ts)",
+                "CREATE INDEX IF NOT EXISTS ix_sess_created ON sessions(created)",
                 # indekslar: har saqlash/panel so`rovi butun jadvalni ko`rib chiqmasligi uchun
                 "CREATE INDEX IF NOT EXISTS ix_aq_attempt ON attempt_q(attempt_id)",
                 "CREATE INDEX IF NOT EXISTS ix_aq_question ON attempt_q(question_id)",
@@ -165,6 +252,9 @@ def init_db():
         add_user(conn, "teacher", "Ustoz", "ustoz", pw, keep_plain=False)
         if not os.environ.get("TEACHER_PASSWORD"):
             print(f"\n[!] Ustoz paroli yaratildi: login=ustoz parol={pw}\n")
+    # eski bazalar: ochiq saqlangan o'quvchi parollari shifrlanadi (bir martalik)
+    for r in conn.execute("SELECT id, pw_plain FROM users WHERE pw_plain IS NOT NULL AND pw_plain NOT LIKE 'enc1:%'").fetchall():
+        conn.execute("UPDATE users SET pw_plain=? WHERE id=?", (seal_pw(r["pw_plain"]), r["id"]))
     conn.execute("ANALYZE")
     conn.close()
     threading.Thread(target=checkpointer, daemon=True).start()
@@ -178,11 +268,67 @@ def hash_pw(pw, salt):
     return hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), PBKDF2_ITERS).hex()
 
 
+DUMMY_SALT = secrets.token_hex(16)  # mavjud bo'lmagan login uchun ham xesh hisoblanadi: javob vaqti bir xil
+
+
+def _pw_key():
+    """O'quvchi parollarini shifrlash kaliti: PW_KEY muhit o'zgaruvchisi yoki baza yonidagi .pw_key fayli.
+    Zaxira (.db) fayli kalitsiz qo'lga tushsa, parollar o'qilmaydi."""
+    if os.environ.get("PW_KEY"):
+        return hashlib.sha256(os.environ["PW_KEY"].encode()).digest()
+    p = Path(DB_PATH).parent / ".pw_key"
+    try:
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.write(fd, secrets.token_hex(32).encode())
+        os.close(fd)
+    except FileExistsError:
+        pass
+    for _ in range(50):  # boshqa worker endigina yaratayotgan bo'lsa
+        v = p.read_text().strip()
+        if len(v) == 64:
+            return bytes.fromhex(v)
+        time.sleep(0.05)
+    raise RuntimeError(".pw_key fayli buzilgan")
+
+
+_PWK = _pw_key()
+
+
+def _stream(nonce, n):
+    out = b""
+    for i in range(0, n, 32):
+        out += hmac.new(_PWK, b"s" + nonce + i.to_bytes(4, "big"), hashlib.sha256).digest()
+    return out[:n]
+
+
+def seal_pw(pw):
+    """Parolni shifrlaydi (HMAC-SHA256 oqimi + yaxlitlik belgisi)."""
+    if pw is None:
+        return None
+    data, nonce = pw.encode(), secrets.token_bytes(16)
+    ct = bytes(a ^ b for a, b in zip(data, _stream(nonce, len(data))))
+    tag = hmac.new(_PWK, b"t" + nonce + ct, hashlib.sha256).digest()[:16]
+    return "enc1:" + base64.urlsafe_b64encode(nonce + tag + ct).decode()
+
+
+def reveal_pw(v):
+    if not v or not v.startswith("enc1:"):
+        return v
+    try:
+        raw = base64.urlsafe_b64decode(v[5:])
+        nonce, tag, ct = raw[:16], raw[16:32], raw[32:]
+        if not hmac.compare_digest(tag, hmac.new(_PWK, b"t" + nonce + ct, hashlib.sha256).digest()[:16]):
+            return None
+        return bytes(a ^ b for a, b in zip(ct, _stream(nonce, len(ct)))).decode()
+    except Exception:
+        return None
+
+
 def add_user(conn, role, name, login, pw, keep_plain=True):
     salt = secrets.token_hex(16)
     conn.execute(
         "INSERT INTO users(role,name,login,salt,pw_hash,pw_plain) VALUES(?,?,?,?,?,?)",
-        (role, name, login, salt, hash_pw(pw, salt), pw if keep_plain else None),
+        (role, name, login, salt, hash_pw(pw, salt), seal_pw(pw) if keep_plain else None),
     )
 
 
@@ -241,13 +387,16 @@ async def _redir(request, exc):
     return RedirectResponse("/", status_code=303)
 
 
+SESSION_TTL = 12 * 3600  # cookie bilan bir xil: muddati o'tgan token serverda ham ishlamaydi
+
+
 def current_user(request, conn):
     tok = request.cookies.get("sid")
     if not tok:
         return None
     return conn.execute(
-        "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?", (tok,)
-    ).fetchone()
+        "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.created>?",
+        (tok, int(time.time()) - SESSION_TTL)).fetchone()
 
 
 def require(role):
@@ -315,7 +464,8 @@ templates.env.filters["dt"] = lambda t: fmt_ts(t)
 templates.env.filters["tm"] = lambda t: fmt_ts(t, "%H:%M")
 templates.env.filters["dtl"] = lambda t: fmt_ts(t, "%Y-%m-%dT%H:%M") if t else ""
 templates.env.filters["dtf"] = lambda t: fmt_ts(t, "%d.%m.%Y %H:%M")
-templates.env.filters["num"] = lambda x: ("%g" % round(x or 0, 1))
+templates.env.filters["pw"] = lambda v: reveal_pw(v) or ""
+templates.env.filters["num"] =lambda x: ("%g" % round(x or 0, 1))
 
 
 def back(url, msg=None):
@@ -354,7 +504,33 @@ def pick_questions(conn, n, avoid=(), hard=()):
     return out
 
 # ---------------- umumiy ----------------
-_fails = {}
+FAIL_WINDOW = 300     # soniya
+FAIL_PER_LOGIN = 8    # bitta IP dan bitta loginga: shundan keyin shu IP uchun 5 daqiqa blok
+FAIL_PER_IP = 100     # bitta IP dan barcha loginlarga (sinf bitta Wi-Fi'da bo'lishi mumkin)
+
+
+def client_ip(request):
+    # Railway edge haqiqiy IP ni o'zi qo'yadi (mijoz yuborgan X-Forwarded-For almashtiriladi)
+    return request.client.host if request.client else "?"
+
+
+def login_blocked(conn, ip, key):
+    since = int(time.time()) - FAIL_WINDOW
+    n_login = conn.execute("SELECT COUNT(*) FROM login_fails WHERE k=? AND ts>?", (f"{ip}|{key}", since)).fetchone()[0]
+    n_ip = conn.execute("SELECT COUNT(*) FROM login_fails WHERE k=? AND ts>?", (f"{ip}|*", since)).fetchone()[0]
+    return n_login >= FAIL_PER_LOGIN or n_ip >= FAIL_PER_IP
+
+
+def login_failed(conn, ip, key):
+    now = int(time.time())
+    conn.executemany("INSERT INTO login_fails(k,ts) VALUES(?,?)", [(f"{ip}|{key}", now), (f"{ip}|*", now)])
+    if secrets.randbelow(50) == 0:  # eski yozuvlar vaqti-vaqti bilan tozalanadi
+        conn.execute("DELETE FROM login_fails WHERE ts<?", (now - 3600,))
+
+
+def clear_fails(conn, key):
+    conn.execute("DELETE FROM login_fails WHERE k LIKE ? ESCAPE '\\'",
+                 ("%|" + key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"),))
 
 
 @app.get("/")
@@ -367,22 +543,23 @@ def index(request: Request, conn=Depends(get_db)):
 
 @app.post("/login")
 def login(request: Request, login: str = Form(...), password: str = Form(...), conn=Depends(get_db)):
-    # tunnel orqali hamma so`rov 127.0.0.1 dan keladi: haqiqiy IP sarlavhadan, limit esa akkaunt bo`yicha
-    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    # cheklov login+IP bo'yicha: begona odam noto'g'ri parol terib, haqiqiy egasini (boshqa IP dan) bloklay olmaydi
+    ip = client_ip(request)
     now = time.time()
-    key = login.strip().lower()
-    recent = [t for t in _fails.get(key, []) if now - t < 300]
-    if len(recent) >= 8:
+    key = login.strip().lower()[:80]
+    if login_blocked(conn, ip, key):
         return login_page(request, conn, "Juda ko'p urinish. 5 daqiqadan keyin qayta urining.")
-    u = conn.execute("SELECT * FROM users WHERE login=?", (login.strip().lower(),)).fetchone()
-    if not u or not secrets.compare_digest(u["pw_hash"], hash_pw(password, u["salt"])):
-        recent.append(now)
-        _fails[key] = recent
+    u = conn.execute("SELECT * FROM users WHERE login=?", (key,)).fetchone()
+    ok = secrets.compare_digest(u["pw_hash"], hash_pw(password, u["salt"])) if u else \
+        (hash_pw(password, DUMMY_SALT) and False)  # login yo'q bo'lsa ham xesh: javob vaqti bir xil
+    if not ok:
+        login_failed(conn, ip, key)
         return login_page(request, conn, "Login yoki parol noto'g'ri")
     tok = secrets.token_urlsafe(32)
     conn.execute("BEGIN")
-    conn.execute("DELETE FROM sessions WHERE user_id=?", (u["id"],))  # bitta qurilma
+    conn.execute("DELETE FROM sessions WHERE user_id=? OR created<?", (u["id"], int(now) - SESSION_TTL))  # bitta qurilma
     conn.execute("INSERT INTO sessions(token,user_id,created) VALUES(?,?,?)", (tok, u["id"], int(now)))
+    conn.execute("DELETE FROM login_fails WHERE k=?", (f"{ip}|{key}",))
     conn.execute("COMMIT")
     r = RedirectResponse("/t" if u["role"] == "teacher" else "/s", status_code=303)  # "/" orqali ortiqcha aylanmasiz
     r.set_cookie("sid", tok, httponly=True, samesite="lax", max_age=60 * 60 * 12, secure=COOKIE_SECURE)
@@ -390,6 +567,12 @@ def login(request: Request, login: str = Form(...), password: str = Form(...), c
 
 
 @app.get("/logout")
+def logout_get():
+    # chiqish faqat POST orqali (boshqa sayt havola/rasm bilan chiqarib yubora olmaydi)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/logout")
 def logout(request: Request, conn=Depends(get_db)):
     tok = request.cookies.get("sid")
     if tok:
@@ -842,9 +1025,9 @@ def teacher_student_pw(uid: int, u=Depends(require("teacher")), conn=Depends(get
         return back("/t/students")
     pw = password.strip() or gen_pw(s["name"])
     salt = secrets.token_hex(16)
-    conn.execute("UPDATE users SET salt=?, pw_hash=?, pw_plain=? WHERE id=?", (salt, hash_pw(pw, salt), pw, uid))
+    conn.execute("UPDATE users SET salt=?, pw_hash=?, pw_plain=? WHERE id=?", (salt, hash_pw(pw, salt), seal_pw(pw), uid))
     conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
-    _fails.pop(s["login"], None)
+    clear_fails(conn, s["login"])
     return back(f"/t/students/{uid}", f"Yangi parol: {pw}")
 
 
@@ -869,7 +1052,7 @@ def teacher_students_csv(grp: str = "", u=Depends(require("teacher")), conn=Depe
     w = csv.writer(out, delimiter=";")
     w.writerow(["Guruh", "F.I.Sh.", "Login", "Parol"])
     for r in conn.execute(q, (grp,) if grp else ()):
-        w.writerow([r["grp"] or "", r["name"], r["login"], r["pw_plain"] or ""])
+        w.writerow([r["grp"] or "", r["name"], r["login"], reveal_pw(r["pw_plain"]) or ""])
     return Response("﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f"attachment; filename=login_parollar{('_' + slug(grp)) if grp else ''}.csv"})
 

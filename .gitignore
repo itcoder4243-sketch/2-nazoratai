@@ -40,3 +40,4 @@ loadtest_*.txt
 .claude/
 shots/
 *.exe
+.pw_key

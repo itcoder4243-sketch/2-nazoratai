@@ -239,3 +239,6 @@ body.cfm-open{overflow:hidden}
   .note{flex-wrap:wrap}.note .acts{width:100%;justify-content:flex-start}
 }
 body.t main p a:not(.btn),body.t .empty a:not(.btn){color:#a5abff}
+.me form.lo{margin:0 0 0 auto}
+.me form.lo button{background:none;box-shadow:none;border:0;color:var(--mut);display:grid;place-items:center;padding:6px;min-height:0;border-radius:8px}
+.me form.lo button:hover{color:#fff;background:rgba(255,255,255,.08);transform:none}

@@ -24,6 +24,7 @@ Ustoz savollar bazasini yuritadi. Har bir o'quvchiga bazadan alohida **5 ta savo
 - Vaqt: sukut bo'yicha har bir talabaga «Boshlash» dan boshlab 60 daqiqa; xohlansa imtihonning boshlanish va tugash vaqti (Toshkent vaqti).
 - Imtihonni to'xtatish: tugma bosilgandan keyin ishlar qabul qilinmaydi, yozayotganlar «Qabul qilinmaganlar» ro'yxatiga tushadi; ustoz ularga nazoratni qayta beradi yoki imtihonni qayta ochadi.
 - Har bir amal tugmasi oldidan tasdiqlash oynasi: nima o'zgaradi (yashil) va nimaga e'tibor berish kerak (qizil), «Davom et» / «Orqaga».
+- Xavfsizlik: login cheklovi login+IP bo'yicha (begona odam egasini bloklay olmaydi), so'rov hajmi cheklovi, himoya sarlavhalari (CSP, X-Frame-Options, HSTS), 12 soatlik sessiya, POST orqali chiqish, o'quvchi parollari bazada shifrlangan (kalit: `PW_KEY` yoki baza yonidagi `.pw_key`; zaxira faylida parollar o'qilmaydi).
 - Zaxira: har kuni avtomatik zaxira (14 kun saqlanadi), qo'lda zaxira olish va yuklab olish.
 - Ustoz parolini panelning o'zidan o'zgartirish.
 - Telefon: menyu pastki chap tugma orqali chap tomondan chiqadi.
