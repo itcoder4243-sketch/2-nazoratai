@@ -6,7 +6,7 @@
 <div class="card stat"><div class="ico">{{ ic('users') }}</div><span class="mut">Talabalar</span><b>{{ stats.students }}</b>
   <small>Kirmagan: {{ stats.cnt['Kirmagan'] }} · Yozmoqda: {{ stats.cnt['Yozmoqda'] }}</small></div>
 <div class="card stat c2"><div class="ico">{{ ic('book') }}</div><span class="mut">Savollar bazasi</span><b>{{ stats.questions }}</b>
-  <small>Har talabaga {{ cfg.q_count }} ta · {{ cfg.duration_min }} daqiqa</small></div>
+  <small>Har talabaga {{ cfg.q_count }} ta · {{ cfg.duration_min }} daqiqa · <a href="/t/settings">o'zgartirish</a></small></div>
 <div class="card stat c3"><div class="ico">{{ ic('clock') }}</div><span class="mut">Tekshirilmagan</span><b>{{ stats.pending }}</b>
   <small>Shundan chetlatilgan: {{ stats.cnt['Chetlatilgan'] }}</small></div>
 <div class="card stat c4"><div class="ico">{{ ic('check') }}</div><span class="mut">Baholangan</span><b>{{ stats.graded }}</b>
@@ -73,19 +73,6 @@
 </div>
 {% endif %}
 
-<div class="card" style="margin-bottom:18px">
-<h3>Sozlamalar</h3>
-<form method="post" action="/t/settings" class="row">
-<div style="grid-column:1/-1"><label>Nazorat nomi (kirish sahifasida ko'rinadi)</label><input name="exam_title" value="{{ cfg.exam_title }}" placeholder="masalan: Pedagogika — nazorat ishi" maxlength="120"></div>
-<div><label>Vaqt (daqiqa)</label><input type="number" name="duration_min" value="{{ cfg.duration_min }}" min="1"></div>
-<div><label>Savollar soni</label><input type="number" name="q_count" value="{{ cfg.q_count }}" min="1"></div>
-<div><label>Har savol maks. ball</label><input type="number" name="max_per_q" value="{{ cfg.max_per_q }}" min="1"></div>
-<div><label>Har ogohlantirish jarimasi (ball)</label><input type="number" name="penalty_points" value="{{ cfg.penalty_points }}" min="0"></div>
-<div><label>Nechinchisida chetlatiladi</label><input type="number" name="max_strikes" value="{{ cfg.max_strikes }}" min="1"></div>
-<div style="align-self:end"><button>Saqlash</button></div>
-</form>
-<p class="mut">Vaqt va savollar soni faqat hali boshlamagan talabalarga ta'sir qiladi. Oynadan chiqish yoki skrinshot urinishi: 1- va 2-marta jarima, 3-martada talaba chetlatiladi va ish avtomatik yuboriladi.</p>
-</div>
 </main>
 <script>
 document.querySelectorAll('[data-state-pick]').forEach(b=>b.onclick=()=>{const s=document.querySelector('select[data-f=state]');

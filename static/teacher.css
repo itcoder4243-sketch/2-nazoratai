@@ -105,3 +105,14 @@ details.ed[open]{display:block;margin-top:8px}
 .gbar{position:sticky;bottom:0;z-index:5;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
   background:rgba(14,19,38,.92);backdrop-filter:blur(10px);border:1px solid var(--bd);border-radius:14px;padding:12px 16px;margin-bottom:18px}
 .gbar .tot{font-size:20px;font-weight:700}
+
+/* ---- v4: sahifalash, sozlamalar ---- */
+.filters .pgsize{flex:0 0 auto;min-width:0;width:auto}
+.pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;margin-top:14px}
+.pager .nums{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pager button{min-width:40px}
+.pager button.on{border:2px solid #7c83ff;color:#c9d0ff;background:rgba(124,131,255,.18);cursor:default;transform:none}
+.pager button:disabled{opacity:.4;cursor:default;transform:none}
+.pager>.mut{flex-basis:100%;text-align:center;font-size:13px}
+.kv{display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid var(--bd);border-radius:12px}
+.stat small a{color:#a9afff}

@@ -532,6 +532,13 @@ def recent_events(conn, limit=12):
     return [dict(ts=e[0], kind=e[1], aid=e[2], text=e[3]) for e in ev[:limit]]
 
 
+@app.get("/t/settings")
+def teacher_settings_page(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+    cfg = {k: setting(conn, k) for k in DEFAULTS}
+    cfg["exam_title"] = setting_s(conn, "exam_title")
+    return render(request, "t_settings.html", user=u, cfg=cfg)
+
+
 @app.post("/t/settings")
 def teacher_settings(u=Depends(require("teacher")), conn=Depends(get_db),
                      duration_min: int = Form(60), q_count: int = Form(5),
@@ -542,7 +549,7 @@ def teacher_settings(u=Depends(require("teacher")), conn=Depends(get_db),
                      penalty_points=penalty_points, max_strikes=max(1, max_strikes)).items():
         conn.execute("UPDATE settings SET value=? WHERE key=?", (str(max(0, v)), k))
     _settings["t"] = 0
-    return back("/t", "Sozlamalar saqlandi")
+    return back("/t/settings", "Sozlamalar saqlandi")
 
 
 # ---- savollar ----

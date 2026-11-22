@@ -3,7 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ustoz paneli · Nazorat</title>
 <link rel="stylesheet" href="/static/style.css?v=4">
-<link rel="stylesheet" href="/static/teacher.css?v=4"></head>
+<link rel="stylesheet" href="/static/teacher.css?v=5"></head>
 <body class="t">
 <div class="shell">
 <aside class="side">
@@ -13,6 +13,7 @@
     <a href="/t" class="{{ 'on' if p == '/t' or p.startswith('/t/attempt') }}">{{ ic('chart') }}<span>Natijalar</span></a>
     <a href="/t/questions" class="{{ 'on' if p.startswith('/t/questions') }}">{{ ic('book') }}<span>Savollar</span></a>
     <a href="/t/students" class="{{ 'on' if p.startswith('/t/students') }}">{{ ic('users') }}<span>Talabalar</span></a>
+    <a href="/t/settings" class="{{ 'on' if p.startswith('/t/settings') }}">{{ ic('settings') }}<span>Sozlamalar</span></a>
   </nav>
   <div class="me"><div class="av">{{ user.name[:1] }}</div><div><b>{{ user.name }}</b><small>Administrator</small></div>
     <a href="/logout" title="Chiqish">{{ ic('logout') }}</a></div>
@@ -22,22 +23,65 @@
 {% if msg %}<div class="flash" id="flash">{{ msg }}<button type="button" onclick="this.parentNode.remove()" aria-label="Yopish">×</button></div>{% endif %}
 {% block body %}{% endblock %}</div>
 <script>
-// jadval filtri: <input data-f="q">, <select data-f="grp|state"> va <tr data-q data-grp data-state>
+// jadval filtri va sahifalash: <div data-filter="#id"> ichida <input data-f="q">, <select data-f="grp|state">; qatorlar <tr data-q data-grp data-state>
 (function(){
   const box=document.querySelector('[data-filter]'); if(!box)return;
-  const tbl=document.querySelector(box.dataset.filter), cnt=box.querySelector('[data-count]'), key='flt:'+location.pathname;
+  const tbl=document.querySelector(box.dataset.filter), cnt=box.querySelector('[data-count]'), key='flt:'+location.pathname, pkey='pg:'+location.pathname;
   const ctl=[...box.querySelectorAll('[data-f]')];
+  const rows=[...tbl.querySelectorAll('tr[data-q]')];
+  let size=15, page=1;
+  try{const s=localStorage.getItem('pg:size');if(s!==null)size=+s;page=+sessionStorage.getItem(pkey)||1;}catch(e){}
+  // har sahifada nechta qator
+  const sel=document.createElement('select');sel.className='pgsize';sel.title='Har sahifada';
+  [[10,'10 tadan'],[15,'15 tadan'],[25,'25 tadan'],[0,'Hammasi']].forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o);});
+  sel.value=String([10,15,25,0].includes(size)?size:15);size=+sel.value;
+  box.insertBefore(sel,cnt?cnt.parentNode:null);
+  const pager=document.createElement('div');pager.className='pager noprint';
+  (tbl.closest('.tbl')||tbl).after(pager);
   try{const s=JSON.parse(localStorage.getItem(key)||'{}');ctl.forEach(c=>{if(s[c.dataset.f]!=null)c.value=s[c.dataset.f];});}catch(e){}
-  function run(){
+  let vis=[];
+  function btn(t,p,dis,on){const b=document.createElement('button');b.type='button';b.className='sec sm'+(on?' on':'');b.textContent=t;b.disabled=dis;
+    if(!dis&&!on)b.onclick=()=>{page=p;draw();(tbl.closest('.card')||tbl).scrollIntoView({behavior:'smooth',block:'start'});};return b;}
+  function draw(){
+    const pages=size?Math.max(1,Math.ceil(vis.length/size)):1;
+    page=Math.min(Math.max(1,page),pages);
+    try{sessionStorage.setItem(pkey,page);}catch(e){}
+    const from=size?(page-1)*size:0, to=size?from+size:vis.length;
+    rows.forEach(tr=>tr.style.display='none');
+    vis.forEach((tr,i)=>{if(i>=from&&i<to)tr.style.display='';});
+    pager.innerHTML='';
+    if(pages<=1){pager.style.display='none';return;}
+    pager.style.display='';
+    pager.appendChild(btn('\u2039 Oldingi',page-1,page===1));
+    const nums=document.createElement('span');nums.className='nums';
+    let last=0;
+    for(let p=1;p<=pages;p++){
+      if(p===1||p===pages||Math.abs(p-page)<=1){
+        if(p-last>1){const d=document.createElement('span');d.className='mut';d.textContent='\u2026';nums.appendChild(d);}
+        nums.appendChild(btn(String(p),p,false,p===page));last=p;}
+    }
+    pager.appendChild(nums);
+    pager.appendChild(btn('Keyingi \u203a',page+1,page===pages));
+    const info=document.createElement('span');info.className='mut';
+    info.textContent=(from+1)+'\u2013'+Math.min(to,vis.length)+' / '+vis.length;
+    pager.appendChild(info);
+  }
+  function run(reset){
     const v={};ctl.forEach(c=>v[c.dataset.f]=c.value.trim().toLowerCase());
     try{localStorage.setItem(key,JSON.stringify(v));}catch(e){}
-    let n=0;tbl.querySelectorAll('tr[data-q]').forEach(tr=>{
-      const ok=(!v.q||tr.dataset.q.includes(v.q))&&(!v.grp||tr.dataset.grp.toLowerCase()===v.grp)&&(!v.state||tr.dataset.state.toLowerCase()===v.state);
-      tr.style.display=ok?'':'none';if(ok)n++;});
-    if(cnt)cnt.textContent=n;
-    document.querySelectorAll('[data-grp-link]').forEach(a=>{a.href=a.dataset.grpLink+(v.grp?('?grp='+encodeURIComponent(box.querySelector('[data-f=grp]').value)):'');});
+    vis=rows.filter(tr=>(!v.q||tr.dataset.q.includes(v.q))&&(!v.grp||tr.dataset.grp.toLowerCase()===v.grp)&&(!v.state||tr.dataset.state.toLowerCase()===v.state));
+    if(cnt)cnt.textContent=vis.length;
+    if(reset)page=1;
+    draw();
+    const g=box.querySelector('[data-f=grp]');
+    document.querySelectorAll('[data-grp-link]').forEach(a=>{a.href=a.dataset.grpLink+(g&&g.value?('?grp='+encodeURIComponent(g.value)):'');});
   }
-  ctl.forEach(c=>c.addEventListener('input',run));run();
+  ctl.forEach(c=>c.addEventListener('input',()=>run(true)));
+  sel.onchange=()=>{size=+sel.value;try{localStorage.setItem('pg:size',size);}catch(e){}page=1;draw();};
+  // chop etishda filtrga mos hamma qator chiqadi
+  addEventListener('beforeprint',()=>vis.forEach(tr=>tr.style.display=''));
+  addEventListener('afterprint',draw);
+  run(false);
 })();
 </script>
 </div>

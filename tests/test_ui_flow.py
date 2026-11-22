@@ -15,7 +15,7 @@ check("kirish: standart nom, 60 daqiqa, 5 savol, qoida", "Nazorat ishi" in r.tex
 r = P.post("/login", data={"login": "x", "password": "y"}); check("xato parolda ham kirish sahifasi to'liq", "Login yoki parol" in html.unescape(r.text) and "60 daqiqa" in r.text)
 T = cl(); T.post("/login", data={"login": "ustoz", "password": TPW})
 T.post("/t/settings", data={"duration_min": 60, "q_count": 5, "max_per_q": 20, "penalty_points": 10, "max_strikes": 3, "exam_title": "Pedagogika — nazorat ishi"})
-check("nazorat nomi saqlandi va ko'rinadi", "Pedagogika — nazorat ishi" in cl().get("/").text and "Pedagogika" in T.get("/t").text)
+check("nazorat nomi saqlandi va ko'rinadi", "Pedagogika — nazorat ishi" in cl().get("/").text and "Pedagogika" in T.get("/t/settings").text)
 check("sozlamalar o'zgarmadi", A.setting(db(), "duration_min") == 60 and A.setting(db(), "q_count") == 5)
 # 3 talaba: biri yozadi, biri yuboradi, biri chetlatiladi
 S = []
