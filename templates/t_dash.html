@@ -1,0 +1,113 @@
+{% extends "base_t.html" %}
+{% block body %}
+{% from "icons.html" import ic %}
+<main>
+<div class="phead">
+  <div><h1>Dashboard</h1><p class="mut">{{ cfg.exam_title or 'Nazorat ishi' }} · yangilandi {{ now_s }}</p></div>
+  <div class="acts"><label class="chk" style="margin:0"><input type="checkbox" id="auto"> Avto yangilash (30 s)</label>
+    <a class="btn sec sm" href="/t">Yangilash</a></div>
+</div>
+
+<div class="kpis">
+<a class="card stat" href="/t/results"><div class="ico">{{ ic('users') }}</div><span class="mut">Topshirdi</span>
+  <b>{{ stats.submitted }}<small class="of">/ {{ stats.students }}</small></b>
+  <small>Yozmoqda: {{ stats.cnt['Yozmoqda'] }} · Kirmagan: {{ stats.cnt['Kirmagan'] }}</small></a>
+<a class="card stat c3" href="/t/review"><div class="ico">{{ ic('pen') }}</div><span class="mut">Tekshirilmagan</span>
+  <b>{{ stats.pending }}</b><small>Chetlatilgan: {{ stats.cnt['Chetlatilgan'] }} · Baholangan: {{ stats.graded }}</small></a>
+<div class="card stat c2"><div class="ico">{{ ic('chart') }}</div><span class="mut">O'rtacha ball</span>
+  <b>{{ stats.avg|num if stats.avg is not none else '–' }}<small class="of">/ {{ mx_total }}</small></b>
+  <small>Mediana: {{ summary.median|num if summary.median is not none else '–' }} · Eng yuqori: {{ summary.max|num if summary.max is not none else '–' }}</small></div>
+<div class="card stat c4"><div class="ico">{{ ic('check') }}</div><span class="mut">O'zlashtirish</span>
+  <b>{{ summary['pass'] if summary['pass'] is not none else '–' }}{% if summary['pass'] is not none %}<small class="of">%</small>{% endif %}</b>
+  <small>3 va undan yuqori baho olganlar ulushi</small></div>
+</div>
+
+{% set n = stats.students or 1 %}
+{% set segs = [('Kirmagan','s-k'),('Yozmoqda','s-y'),('Tekshirilmagan','s-t'),('Chetlatilgan','s-c'),('Baholangan','s-b')] %}
+<div class="cols2 wide">
+<div class="card">
+  <div class="bar"><h2>Imtihon jarayoni</h2><span class="mut">{{ stats.students }} talaba</span></div>
+  <div class="prog">{% for s, c in segs %}{% if stats.cnt[s] %}<i class="{{ c }}" style="width:{{ stats.cnt[s] / n * 100 }}%" title="{{ s }}: {{ stats.cnt[s] }}"></i>{% endif %}{% endfor %}</div>
+  <div class="legend">{% for s, c in segs %}<a class="lgd" href="/t/results?state={{ s }}" data-state-pick="{{ s }}"><i class="{{ c }}"></i>{{ s }} <b>{{ stats.cnt[s] }}</b></a>{% endfor %}</div>
+  <p class="mut" style="margin:12px 0 0">Holat ustiga bosing: Natijalar sahifasi shu holat bo'yicha filtrlangan holda ochiladi.</p>
+</div>
+<div class="card">
+  <div class="bar"><h2>So'nggi hodisalar</h2></div>
+  {% if events %}<div class="feed nob">
+  {% for e in events %}<a class="ev {{ e.kind }}" href="/t/attempt/{{ e.aid }}"><span><i>{{ {'ban':'⛔','warn':'⚠','sent':'✓','start':'▶'}[e.kind] }}</i>{{ e.text }}</span><span class="mut">{{ e.ts|tm }}</span></a>{% endfor %}
+  </div>{% else %}<div class="empty">Hali hodisa yo'q. Talabalar imtihonni boshlaganda shu yerda ko'rinadi.</div>{% endif %}
+</div>
+</div>
+
+<div class="cols2 wide">
+<div class="card">
+  <div class="bar"><h2>Ballar taqsimoti</h2><span class="mut">{{ stats.graded }} ta baholangan ish</span></div>
+  {% if stats.graded %}
+  {% set W, H, L, B = 600, 220, 34, 28 %}{% set bw = (W - L) / 10 %}
+  <div class="chart">
+  <svg viewBox="0 0 {{ W }} {{ H + B }}" role="img" aria-label="Ballar gistogrammasi">
+    {% for k in range(0, 5) %}{% set y = H - H * k / 4 %}{% set v = (hmax * k / 4) %}
+    <line x1="{{ L }}" x2="{{ W }}" y1="{{ y }}" y2="{{ y }}" class="grid"/>
+    <text x="{{ L - 8 }}" y="{{ y + 4 }}" class="ax" text-anchor="end">{{ v|int }}</text>{% endfor %}
+    {% for h in hist %}{% set bh = (H - 12) * h.n / hmax %}{% set x = L + loop.index0 * bw %}
+    <g class="hb"><title>{{ h.lo|num }}–{{ h.hi|num }} ball: {{ h.n }} ta talaba</title>
+      <rect x="{{ x }}" y="0" width="{{ bw }}" height="{{ H }}" class="hit"/>
+      {% if h.n %}<path class="bar-f" d="M{{ x + 4 }},{{ H }} V{{ H - bh + 4 }} q0,-4 4,-4 H{{ x + bw - 8 }} q4,0 4,4 V{{ H }} Z"/>
+      <text x="{{ x + bw / 2 }}" y="{{ H - bh - 6 }}" class="val" text-anchor="middle">{{ h.n }}</text>{% endif %}
+      <text x="{{ x + bw / 2 }}" y="{{ H + 18 }}" class="ax" text-anchor="middle">{{ h.lo|round(0)|int }}–{{ h.hi|round(0)|int }}</text>
+    </g>{% endfor %}
+    <line x1="{{ L }}" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}" class="base"/>
+  </svg></div>
+  <p class="mut" style="margin:6px 0 0">Gorizontal o'q: ball oralig'i (jami {{ mx_total }}), vertikal o'q: talabalar soni.</p>
+  {% else %}<div class="empty tall">Hali baholangan ish yo'q.<br>Ishlarni <a href="/t/review">Tekshirish</a> bo'limida baholang, diagramma shu yerda paydo bo'ladi.</div>{% endif %}
+</div>
+<div class="card">
+  <div class="bar"><h2>Baholar</h2></div>
+  {% set gl = {5: "A'lo", 4: 'Yaxshi', 3: 'Qoniqarli', 2: 'Qoniqarsiz'} %}
+  {% set gt = stats.graded or 1 %}
+  <div class="grades">
+  {% for g in [5, 4, 3, 2] %}<div class="gr" title="{{ g }} — {{ gl[g] }}: {{ grades[g] }} ta">
+    <span class="gn g{{ g }}">{{ g }}</span><span class="gl">{{ gl[g] }}</span>
+    <span class="gtrack"><i style="width:{{ grades[g] / gt * 100 }}%"></i></span>
+    <b>{{ grades[g] }}</b><span class="mut gp">{{ (grades[g] / gt * 100)|round(0)|int if stats.graded else 0 }}%</span></div>{% endfor %}
+  </div>
+  <p class="mut" style="margin:12px 0 0">5: 86% dan · 4: 71% dan · 3: 56% dan yuqori ball.</p>
+</div>
+</div>
+
+<div class="cols2">
+<div class="card">
+  <div class="bar"><h2>{{ ic('trophy') }} TOP-10</h2><span class="mut">eng yuqori ball</span></div>
+  {% if top %}<ol class="rank">{% for r in top %}
+  <li><a href="/t/attempt/{{ r.aid }}"><span class="pos p{{ loop.index }}">{{ loop.index }}</span>
+    <span class="who">{{ r.name }}<small>{{ r.grp or '' }}</small></span>
+    <span class="sc">{{ r.total|num }}</span><span class="gn g{{ r.grade }}">{{ r.grade }}</span></a></li>{% endfor %}
+  </ol>{% else %}<div class="empty">Baholangan ish yo'q.</div>{% endif %}
+</div>
+<div class="card">
+  <div class="bar"><h2>{{ ic('down') }} Eng past 10</h2><span class="mut">e'tibor talab qiladi</span></div>
+  {% if low %}<ol class="rank low">{% for r in low %}
+  <li><a href="/t/attempt/{{ r.aid }}"><span class="pos">{{ loop.index }}</span>
+    <span class="who">{{ r.name }}<small>{{ r.grp or '' }}{% if r.disq %} · chetlatilgan{% endif %}</small></span>
+    <span class="sc">{{ r.total|num }}</span><span class="gn g{{ r.grade }}">{{ r.grade }}</span></a></li>{% endfor %}
+  </ol>{% else %}<div class="empty">Baholangan ish yo'q.</div>{% endif %}
+</div>
+</div>
+
+<div class="card" style="margin-bottom:18px">
+  <div class="bar"><h2>Guruhlar kesimida</h2></div>
+  <div class="tbl"><table>
+  <tr><th>Guruh</th><th>Talabalar</th><th>Topshirdi</th><th>Baholandi</th><th>O'rtacha</th><th>Eng yuqori</th><th></th></tr>
+  {% for g in groups %}<tr><td><b>{{ g.grp }}</b></td><td>{{ g.n }}</td>
+    <td><span class="mini"><i style="width:{{ (g.sub / (g.n or 1) * 100)|round(0) }}%"></i></span>{{ g.sub }}</td>
+    <td>{{ g.graded }}</td><td>{{ g.avg|num if g.avg is not none else '–' }}</td><td>{{ g.max|num if g.max is not none else '–' }}</td>
+    <td><a class="btn sec sm" href="/t/results?grp={{ g.grp }}">Ko'rish</a></td></tr>{% endfor %}
+  </table></div>
+</div>
+</main>
+<script>
+(function(){const cb=document.getElementById('auto');let on=false;try{on=localStorage.getItem('auto:dash')==='1';}catch(e){}
+cb.checked=on;cb.onchange=()=>{try{localStorage.setItem('auto:dash',cb.checked?'1':'0');}catch(e){}};
+setInterval(()=>{if(cb.checked)location.reload();},30000);})();
+</script>
+{% endblock %}

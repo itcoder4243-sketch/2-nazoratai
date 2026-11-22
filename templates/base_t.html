@@ -3,14 +3,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ustoz paneli · Nazorat</title>
 <link rel="stylesheet" href="/static/style.css?v=4">
-<link rel="stylesheet" href="/static/teacher.css?v=5"></head>
+<link rel="stylesheet" href="/static/teacher.css?v=7"></head>
 <body class="t">
 <div class="shell">
 <aside class="side">
   <div class="brand"><span class="logo">{{ ic('logo') }}</span><div><b>Nazorat</b><small>Ustoz paneli</small></div></div>
   {% set p = request.url.path %}
   <nav>
-    <a href="/t" class="{{ 'on' if p == '/t' or p.startswith('/t/attempt') }}">{{ ic('chart') }}<span>Natijalar</span></a>
+    <a href="/t" class="{{ 'on' if p == '/t' }}">{{ ic('grid') }}<span>Dashboard</span></a>
+    <a href="/t/review" class="{{ 'on' if p.startswith('/t/review') or p.startswith('/t/attempt') }}">{{ ic('pen') }}<span>Tekshirish</span>{% if nav_todo %}<em class="badge">{{ nav_todo }}</em>{% endif %}</a>
+    <a href="/t/results" class="{{ 'on' if p.startswith('/t/results') }}">{{ ic('list') }}<span>Natijalar</span></a>
     <a href="/t/questions" class="{{ 'on' if p.startswith('/t/questions') }}">{{ ic('book') }}<span>Savollar</span></a>
     <a href="/t/students" class="{{ 'on' if p.startswith('/t/students') }}">{{ ic('users') }}<span>Talabalar</span></a>
     <a href="/t/settings" class="{{ 'on' if p.startswith('/t/settings') }}">{{ ic('settings') }}<span>Sozlamalar</span></a>
@@ -39,6 +41,8 @@
   const pager=document.createElement('div');pager.className='pager noprint';
   (tbl.closest('.tbl')||tbl).after(pager);
   try{const s=JSON.parse(localStorage.getItem(key)||'{}');ctl.forEach(c=>{if(s[c.dataset.f]!=null)c.value=s[c.dataset.f];});}catch(e){}
+  // havoladan kelgan filtr (?state=Baholangan) saqlanganidan ustun
+  const qp=new URLSearchParams(location.search);ctl.forEach(c=>{if(qp.has(c.dataset.f))c.value=qp.get(c.dataset.f);});
   let vis=[];
   function btn(t,p,dis,on){const b=document.createElement('button');b.type='button';b.className='sec sm'+(on?' on':'');b.textContent=t;b.disabled=dis;
     if(!dis&&!on)b.onclick=()=>{page=p;draw();(tbl.closest('.card')||tbl).scrollIntoView({behavior:'smooth',block:'start'});};return b;}

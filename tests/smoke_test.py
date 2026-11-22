@@ -36,7 +36,7 @@ assert len(seen) == len(set(seen)), "takror savol!"
 print("takrorlanmagan savollar:", len(seen))
 
 t = client(); login(t, "ustoz", "ustoz123")
-assert "Tekshirilmagan" in t.get("/t").text
+assert "Tekshirilmagan" in t.get("/t/results").text
 aid = A.connect().execute("SELECT id FROM attempts LIMIT 1").fetchone()["id"]
 page = t.get(f"/t/attempt/{aid}"); assert "tab_hidden" in page.text
 conn = A.connect()
@@ -64,7 +64,7 @@ assert "chetlashtirildingiz" in s.get("/s").text
 aid = conn.execute("SELECT a.id FROM attempts a JOIN users u ON u.id=a.user_id WHERE u.login='qoida'").fetchone()["id"]
 qs = conn.execute("SELECT id FROM attempt_q WHERE attempt_id=?", (aid,)).fetchall()
 t = client(); login(t, "ustoz", "ustoz123")
-assert "Chetlatilgan" in t.get("/t").text
+assert "Chetlatilgan" in t.get("/t/results").text
 t.post(f"/t/attempt/{aid}/grade", data={**{f"score_{q['id']}": "20" for q in qs}, "comment": "x"})
 assert conn.execute("SELECT total FROM attempts WHERE id=?", (aid,)).fetchone()["total"] == 0
 # 2 marta chiqqan, chetlatilmagan: 100 - 20 = 80

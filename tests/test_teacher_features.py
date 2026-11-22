@@ -15,7 +15,7 @@ T = cl(); r = T.post("/login", data={"login": "ustoz", "password": TPW})
 check("ustoz kiradi", "Natijalar" in r.text)
 for p in ["/t", "/t/students", "/t/questions", "/t/export.csv", "/t/students.csv", "/t/students.csv?grp=G1"]:
     r = T.get(p); check(f"GET {p} 200", r.status_code == 200, r.status_code)
-check("natijalar: filtr va avto yangilash bor", 'data-filter="#res"' in T.get("/t").text and 'id="auto"' in T.get("/t").text)
+check("natijalar: filtr va avto yangilash bor", 'data-filter="#res"' in T.get("/t/results").text and 'id="auto"' in T.get("/t/results").text)
 c306 = T.get("/t/students.csv?grp=G1").text
 check("guruh CSV faqat G1", all(l.startswith("G1;") for l in c306.strip().splitlines()[1:]) and len(c306.strip().splitlines()) > 1)
 
@@ -120,7 +120,7 @@ for k in (10, 11):
     for _ in range(3):
         Sk.post("/api/violation", json={"kind": "tab_hidden"}); con = db(); con.execute("update violations set ts=ts-10"); con.close()
 nd = db().execute("select count(*) from attempts where disq=1").fetchone()[0]
-check("natijalarda chetlatilganlar bloki", "Hammasiga qayta topshirishga ruxsat" in T.get("/t").text)
+check("natijalarda chetlatilganlar bloki", "Hammasiga qayta topshirishga ruxsat" in T.get("/t/results").text)
 r = T.post("/t/retake-disq", data={"carry": "", "new_q": "1", "grp": ""})
 check("hammasiga ruxsat: chetlatilganlar qolmadi", db().execute("select count(*) from attempts where disq=1").fetchone()[0] == 0 and f"{nd} ta" in html.unescape(r.text), nd)
 check("default chegirma 30", all(db().execute("select carry from users where login=?", (rows[k][2],)).fetchone()[0] == 30 for k in (10, 11)))

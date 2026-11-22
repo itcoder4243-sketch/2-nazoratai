@@ -1,7 +1,8 @@
 {% extends "base_t.html" %}
 {% block body %}
 <main>
-<p><a class="btn sec sm" href="/t">← Natijalar</a></p>
+{% set back_url = '/t/review' if att.submitted_at is not none and not att.graded else '/t/results' %}
+<p><a class="btn sec sm" href="{{ back_url }}">← {{ 'Tekshirish' if back_url == '/t/review' else 'Natijalar' }}</a></p>
 <div class="card" style="margin-bottom:18px">
 <h2>{{ att.name }} <span class="mut">({{ att.login }}{% if att.grp %} · {{ att.grp }}{% endif %})</span></h2>
 <p class="mut">{{ att.try_no or 1 }}-urinish · Boshladi: {{ att.started_at|dt }} ·
@@ -47,7 +48,7 @@
 <div class="gbar">
 <div><span class="mut">Jami:</span> <span class="tot" id="tot">–</span> <span class="mut">/ {{ mx * items|length }}</span>
 <span class="mut" style="margin-left:10px">Tekshirilmagan: {{ todo }}</span></div>
-<div class="acts"><a class="btn sec" href="/t">Orqaga</a>
+<div class="acts"><a class="btn sec" href="{{ back_url }}">Orqaga</a>
 <button class="sec" name="go" value="1">Saqlash</button>
 <button class="ok" name="next" value="1">Saqlash va keyingisi →</button></div>
 </div>

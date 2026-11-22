@@ -17,6 +17,8 @@ Ustoz savollar bazasini yuritadi. Har bir o'quvchiga bazadan alohida **5 ta savo
 - Oynadan chiqish: 1- va 2-marta −10 ball, 3-martada o'quvchi chetlashtiriladi.
 
 **Ustoz paneli**
+- Dashboard: asosiy ko'rsatkichlar, imtihon jarayoni, ballar gistogrammasi, baholar taqsimoti, TOP-10, eng past 10, guruhlar kesimi.
+- Tekshirish: baholanmagan ishlar navbati va «Saqlash va keyingisi» oqimi.
 - Natijalar: filtrlar, avtomatik yangilanish, qolgan vaqt, kengaytirilgan CSV.
 - O'quvchilar: qo'shish, tahrirlash, ommaviy yuklash, parolni tiklash, guruhlar, CSV.
 - Savollar: qo'shish, tahrirlash, qidirish, takrorlarni aniqlash, xavfsiz o'chirish.

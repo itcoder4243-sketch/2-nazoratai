@@ -252,7 +252,25 @@ import starlette
 _NEW_TR = tuple(int(x) for x in starlette.__version__.split(".")[:2]) >= (0, 29)
 
 
+def nav_todo():
+    try:
+        conn = _pool.get_nowait()
+    except queue.Empty:
+        conn = connect()
+    try:
+        return conn.execute("SELECT COUNT(*) FROM attempts WHERE graded=0 AND "
+                            "(submitted_at IS NOT NULL OR deadline < ?)", (int(time.time()),)).fetchone()[0]
+    finally:
+        if _pool.qsize() < 64:
+            _pool.put(conn)
+        else:
+            conn.close()
+
+
 def render(request, name, **ctx):
+    u = ctx.get("user")
+    if u is not None and u["role"] == "teacher" and "nav_todo" not in ctx:
+        ctx["nav_todo"] = nav_todo()
     # Starlette >=0.29: (request, name, ctx); eski versiya (Windows 8.1 uchun): (name, ctx+request)
     if _NEW_TR:
         return templates.TemplateResponse(request, name, ctx)
@@ -478,11 +496,20 @@ def state_of(r):
             else "Baholangan" if r["graded"] else "Chetlatilgan" if r["disq"] else "Tekshirilmagan")
 
 
-@app.get("/t")
-def teacher_home(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+STATES = ("Kirmagan", "Yozmoqda", "Tekshirilmagan", "Chetlatilgan", "Baholangan")
+
+
+def load_cfg(conn):
+    cfg = {k: setting(conn, k) for k in DEFAULTS}
+    cfg["exam_title"] = setting_s(conn, "exam_title")
+    return cfg
+
+
+def results_data(conn):
+    """Har bir talabaning joriy holati (vaqti o'tgan ishlar yopiladi), holatlar soni va umumiy statistika."""
     rows = conn.execute(
         "SELECT u.id uid, u.name, u.login, u.grp, u.carry ucarry, a.id aid, a.started_at, a.deadline, a.submitted_at, "
-        "a.total, a.graded, a.disq, a.carry, a.try_no, "
+        "a.total, a.graded, a.graded_at, a.disq, a.carry, a.try_no, "
         "(SELECT COUNT(*) FROM violations v WHERE v.attempt_id=a.id AND v.penalty=1) viol "
         "FROM users u LEFT JOIN attempts a ON a.user_id=u.id WHERE u.role='student' ORDER BY u.grp, u.name").fetchall()
     rows = [dict(r) for r in rows]
@@ -493,23 +520,79 @@ def teacher_home(request: Request, u=Depends(require("teacher")), conn=Depends(g
             r["submitted_at"] = r["deadline"]
         r["state"] = state_of(r)
         r["left"] = max(0, int((r["deadline"] - now) // 60)) if r["state"] == "Yozmoqda" else None
-    cnt = {s: sum(1 for r in rows if r["state"] == s)
-           for s in ("Kirmagan", "Yozmoqda", "Tekshirilmagan", "Chetlatilgan", "Baholangan")}
+    cnt = {s: sum(1 for r in rows if r["state"] == s) for s in STATES}
     graded = [r["total"] for r in rows if r["graded"]]
     stats = {
         "students": len(rows),
         "questions": conn.execute("SELECT COUNT(*) c FROM questions").fetchone()["c"],
         "pending": cnt["Tekshirilmagan"] + cnt["Chetlatilgan"],
         "graded": cnt["Baholangan"], "cnt": cnt,
+        "submitted": cnt["Tekshirilmagan"] + cnt["Chetlatilgan"] + cnt["Baholangan"],
         "avg": sum(graded) / len(graded) if graded else None,
     }
-    cfg = {k: setting(conn, k) for k in DEFAULTS}
-    cfg["exam_title"] = setting_s(conn, "exam_title")
+    return rows, stats
+
+
+@app.get("/t")
+def teacher_dashboard(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+    rows, stats = results_data(conn)
+    cfg = load_cfg(conn)
+    mx = cfg["max_per_q"] * cfg["q_count"]
+    graded = [r for r in rows if r["graded"]]
+    for r in graded:
+        r["grade"] = grade_of(r["total"], mx)
+    top = sorted(graded, key=lambda r: (-r["total"], r["name"]))[:10]
+    low = sorted(graded, key=lambda r: (r["total"], r["name"]))[:10]
+    # gistogramma: 10 ta teng oraliq, oxirgisi maksimal ballni ham o'z ichiga oladi
+    step = mx / 10 if mx else 10
+    hist = []
+    for i in range(10):
+        lo, hi = i * step, (i + 1) * step
+        n = sum(1 for r in graded if lo <= r["total"] < hi or (i == 9 and r["total"] >= hi))
+        hist.append({"lo": lo, "hi": hi, "n": n})
+    # y o'qi uchun butun, teng qadamli belgilar (masalan 0, 4, 8, 12, 16)
+    ystep = max(1, -(-max([h["n"] for h in hist] + [1]) // 4))
+    hmax = ystep * 4
+    grades = {g: sum(1 for r in graded if r["grade"] == g) for g in (5, 4, 3, 2)}
+    totals = sorted(r["total"] for r in graded)
+    k = len(totals)
+    summary = {
+        "median": (totals[k // 2] if k % 2 else (totals[k // 2 - 1] + totals[k // 2]) / 2) if k else None,
+        "max": totals[-1] if k else None, "min": totals[0] if k else None,
+        "pass": round(sum(1 for r in graded if r["grade"] >= 3) / k * 100) if k else None,
+    }
+    groups = []
+    for g in sorted({r["grp"] or "—" for r in rows}, key=lambda g: [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", g)]):
+        gr = [r for r in rows if (r["grp"] or "—") == g]
+        gg = [r["total"] for r in gr if r["graded"]]
+        groups.append({"grp": g, "n": len(gr), "sub": sum(1 for r in gr if r["state"] in STATES[2:]),
+                       "graded": len(gg), "avg": sum(gg) / len(gg) if gg else None, "max": max(gg) if gg else None})
+    return render(request, "t_dash.html", user=u, stats=stats, cfg=cfg, mx_total=mx, top=top, low=low,
+                  hist=hist, hmax=hmax, grades=grades, summary=summary, groups=groups,
+                  events=recent_events(conn), now_s=time.strftime("%H:%M:%S"))
+
+
+@app.get("/t/results")
+def teacher_results(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+    rows, stats = results_data(conn)
+    cfg = load_cfg(conn)
     disq_n = conn.execute("SELECT COUNT(*) c FROM attempts WHERE disq=1").fetchone()["c"]
     groups = sorted({r["grp"] for r in rows if r["grp"]})
-    return render(request, "t_home.html", user=u, rows=rows, stats=stats, cfg=cfg, groups=groups,
-                  mx_total=cfg["max_per_q"] * cfg["q_count"], disq_n=disq_n, events=recent_events(conn),
-                  now_s=time.strftime("%H:%M:%S"))
+    return render(request, "t_results.html", user=u, rows=rows, stats=stats, cfg=cfg, groups=groups,
+                  mx_total=cfg["max_per_q"] * cfg["q_count"], disq_n=disq_n)
+
+
+@app.get("/t/review")
+def teacher_review(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
+    rows, stats = results_data(conn)
+    cfg = load_cfg(conn)
+    queue_ = sorted((r for r in rows if r["state"] in ("Tekshirilmagan", "Chetlatilgan")),
+                    key=lambda r: (r["grp"] or "", r["name"]))
+    done = sorted((r for r in rows if r["graded"]), key=lambda r: -(r["graded_at"] or 0))[:10]
+    writing = [r for r in rows if r["state"] == "Yozmoqda"]
+    groups = sorted({r["grp"] for r in queue_ if r["grp"]})
+    return render(request, "t_review.html", user=u, queue=queue_, done=done, writing=writing, stats=stats,
+                  groups=groups, mx_total=cfg["max_per_q"] * cfg["q_count"], first=next_ungraded(conn))
 
 
 def recent_events(conn, limit=12):
@@ -534,8 +617,7 @@ def recent_events(conn, limit=12):
 
 @app.get("/t/settings")
 def teacher_settings_page(request: Request, u=Depends(require("teacher")), conn=Depends(get_db)):
-    cfg = {k: setting(conn, k) for k in DEFAULTS}
-    cfg["exam_title"] = setting_s(conn, "exam_title")
+    cfg = load_cfg(conn)
     return render(request, "t_settings.html", user=u, cfg=cfg)
 
 
@@ -740,7 +822,7 @@ def teacher_attempt(aid: int, request: Request, u=Depends(require("teacher")), c
     q = "SELECT a.*, u.name, u.login, u.grp FROM attempts a JOIN users u ON u.id=a.user_id WHERE a.id=?"
     att = conn.execute(q, (aid,)).fetchone()
     if not att:
-        return back("/t", "Urinish topilmadi (qayta topshirishga ruxsat berilgan bo'lishi mumkin)")
+        return back("/t/review", "Urinish topilmadi (qayta topshirishga ruxsat berilgan bo'lishi mumkin)")
     finalize_if_expired(conn, att)
     att = conn.execute(q, (aid,)).fetchone()
     items = conn.execute(
@@ -773,7 +855,7 @@ async def teacher_grade(aid: int, request: Request, u=Depends(require("teacher")
     form = await request.form()
     att = conn.execute("SELECT * FROM attempts WHERE id=?", (aid,)).fetchone()
     if not att:
-        return back("/t", "Urinish topilmadi")
+        return back("/t/results", "Urinish topilmadi")
     mx = setting(conn, "max_per_q")
     total = 0.0
     for r in conn.execute("SELECT id FROM attempt_q WHERE attempt_id=?", (aid,)).fetchall():
@@ -793,8 +875,8 @@ async def teacher_grade(aid: int, request: Request, u=Depends(require("teacher")
         nxt = next_ungraded(conn, aid)
         if nxt:
             return back(f"/t/attempt/{nxt}", "Baholandi. Keyingi ish ochildi")
-        return back("/t", "Baholandi. Tekshirilmagan ish qolmadi")
-    return back("/t", "Baholandi")
+        return back("/t/review", "Baholandi. Tekshirilmagan ish qolmadi")
+    return back("/t/review", "Baholandi")
 
 
 def next_ungraded(conn, aid=None):
@@ -860,9 +942,9 @@ def teacher_retake(aid: int, u=Depends(require("teacher")), conn=Depends(get_db)
         conn.execute("ROLLBACK")
         raise
     if not uid:
-        return back("/t", "Urinish topilmadi")
+        return back("/t/results", "Urinish topilmadi")
     c = conn.execute("SELECT name, carry FROM users WHERE id=?", (uid,)).fetchone()
-    return back("/t", f"{c['name']}: qayta topshirishga ruxsat berildi, chegirma -{c['carry']:g} ball")
+    return back("/t/results", f"{c['name']}: qayta topshirishga ruxsat berildi, chegirma -{c['carry']:g} ball")
 
 
 @app.post("/t/attempt/{aid}/reset")
@@ -886,7 +968,7 @@ def teacher_retake_disq(u=Depends(require("teacher")), conn=Depends(get_db),
     except Exception:
         conn.execute("ROLLBACK")
         raise
-    return back("/t", f"{len(ids)} ta chetlatilgan talabaga qayta topshirishga ruxsat berildi")
+    return back("/t/results", f"{len(ids)} ta chetlatilgan talabaga qayta topshirishga ruxsat berildi")
 
 
 @app.post("/t/attempt/{aid}/extend")
@@ -894,7 +976,7 @@ def teacher_extend(aid: int, u=Depends(require("teacher")), conn=Depends(get_db)
     """Vaqt qo`shish; yuborilgan yoki chetlatilgan (baholanmagan) ishni qayta ochish."""
     att = conn.execute("SELECT * FROM attempts WHERE id=?", (aid,)).fetchone()
     if not att:
-        return back("/t", "Urinish topilmadi")
+        return back("/t/results", "Urinish topilmadi")
     if att["graded"]:
         return back(f"/t/attempt/{aid}", "Baholangan ishni qayta ochib bo'lmaydi. Qayta topshirishdan foydalaning.")
     minutes = max(1, min(600, minutes))

@@ -1,0 +1,53 @@
+{% extends "base_t.html" %}
+{% block body %}
+{% from "icons.html" import ic %}
+<main>
+<div class="phead">
+  <div><h1>Tekshirish</h1><p class="mut">Yuborilgan, lekin hali baholanmagan ishlar navbati.</p></div>
+  {% if first %}<a class="btn ok" href="/t/attempt/{{ first }}">Navbatdagini tekshirish →</a>{% endif %}
+</div>
+
+{% set sub = stats.submitted or 1 %}
+<div class="card" style="margin-bottom:18px">
+  <div class="bar"><h2>Tekshiruv jarayoni</h2><span class="mut"><b>{{ stats.graded }}</b> / {{ stats.submitted }} baholandi</span></div>
+  <div class="prog"><i class="s-b" style="width:{{ stats.graded / sub * 100 if stats.submitted else 0 }}%"></i>{% if stats.pending %}<i class="s-t" style="width:{{ stats.pending / sub * 100 }}%"></i>{% endif %}</div>
+  <div class="legend"><span class="lgd"><i class="s-t"></i>Navbatda <b>{{ stats.pending }}</b></span>
+    <span class="lgd"><i class="s-b"></i>Baholangan <b>{{ stats.graded }}</b></span>
+    <span class="lgd"><i class="s-y"></i>Hali yozmoqda <b>{{ writing|length }}</b></span></div>
+</div>
+
+<div class="card" style="margin-bottom:18px">
+  <div class="bar"><h2>Navbat ({{ queue|length }})</h2></div>
+  {% if queue %}
+  <div class="filters" data-filter="#rq">
+    <input data-f="q" type="search" placeholder="Ism yoki login bo'yicha qidirish...">
+    <select data-f="grp"><option value="">Barcha guruhlar</option>{% for g in groups %}<option>{{ g }}</option>{% endfor %}</select>
+    <select data-f="state"><option value="">Hammasi</option><option value="Tekshirilmagan">Oddiy</option><option value="Chetlatilgan">Chetlatilgan</option></select>
+    <span class="mut">Ko'rsatilmoqda: <b data-count>{{ queue|length }}</b></span>
+  </div>
+  <div class="tbl"><table id="rq">
+  <tr><th>Talaba</th><th>Guruh</th><th>Yubordi</th><th>Ogohl.</th><th>Holat</th><th></th></tr>
+  {% for r in queue %}
+  <tr data-q="{{ (r.name ~ ' ' ~ r.login)|lower }}" data-grp="{{ r.grp or '' }}" data-state="{{ r.state }}">
+    <td>{{ r.name }}<div class="mut">{{ r.login }}{% if r.try_no and r.try_no > 1 %} · {{ r.try_no }}-urinish{% endif %}</div></td>
+    <td>{{ r.grp or '' }}</td><td>{{ r.submitted_at|dt }}</td>
+    <td>{% if r.viol %}<span class="tag r">{{ r.viol }}</span>{% else %}–{% endif %}</td>
+    <td><span class="tag {{ 'r' if r.state == 'Chetlatilgan' else 'y' }}">{{ r.state }}</span></td>
+    <td><a class="btn sm" href="/t/attempt/{{ r.aid }}">Tekshirish</a></td></tr>
+  {% endfor %}</table></div>
+  {% else %}<div class="empty tall">✓ Navbat bo'sh: barcha yuborilgan ishlar baholangan.{% if writing %}<br>{{ writing|length }} ta talaba hali yozmoqda.{% endif %}</div>{% endif %}
+</div>
+
+{% if done %}
+<div class="card" style="margin-bottom:18px">
+  <div class="bar"><h2>So'nggi baholanganlar</h2><a class="btn sec sm" href="/t/results?state=Baholangan">Hammasi</a></div>
+  <div class="tbl"><table>
+  <tr><th>Talaba</th><th>Guruh</th><th>Baholandi</th><th>Ball / {{ mx_total }}</th><th>Baho</th><th></th></tr>
+  {% for r in done %}<tr><td>{{ r.name }}</td><td>{{ r.grp or '' }}</td><td>{{ r.graded_at|dt }}</td><td>{{ r.total|num }}</td>
+    <td><span class="gn g{{ grade_of(r.total, mx_total) }}">{{ grade_of(r.total, mx_total) }}</span></td>
+    <td><a class="btn sec sm" href="/t/attempt/{{ r.aid }}">Ochish</a></td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endif %}
+</main>
+{% endblock %}
